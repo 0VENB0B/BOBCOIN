@@ -18,6 +18,11 @@ BANK_LOCK = asyncio.Lock()
 COMMAND_PREFIX = os.getenv("BOBCOIN_PREFIX", "$")
 MAX_BET = 1_000_000
 MAX_PURGE_MESSAGES = 100
+BOT_ICON_URL = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png"
+LIKE_ICON_URL = "https://image.similarpng.com/very-thumbnail/2020/06/Icon-like-button-transparent-PNG.png"
+INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=880963590289498142&permissions=268823616&scope=bot"
+SLOT_SYMBOLS = ("🍎", "🍊", "🍐")
+SLOT_SPIN_FRAMES = ("🍎🍊🍐", "🍊🍐🍎", "🍐🍎🍊")
 MOVIE_RECOMMENDATIONS = (
     "The Shawshank Redemption",
     "The Godfather",
@@ -158,6 +163,15 @@ async def get_balance(user):
         return [account["wallet"], account["bank"]]
 
 
+async def parse_amount_or_reply(ctx, value, missing_message, invalid_message=None):
+    amount = parse_positive_int(value)
+    if amount is None:
+        message = missing_message if value is None else (invalid_message or missing_message)
+        await ctx.send(message)
+        return None
+    return amount
+
+
 def role_can_be_assigned(ctx, role):
     if ctx.guild is None:
         return False, "ใช้คำสั่งนี้ได้เฉพาะใน server"
@@ -171,6 +185,34 @@ def role_can_be_assigned(ctx, role):
         return False, "คุณให้ role ที่สูงกว่าหรือเท่ากับตัวเองไม่ได้"
 
     return True, None
+
+
+async def buy_role(ctx, member, role, price):
+    await open_account(ctx.author)
+    if member is None:
+        await ctx.send("ใส่ชื่อที่จะซื้อของให้")
+        return
+    if role is None:
+        await ctx.send("ใส่สิ่งของที่ต้องการ")
+        return
+
+    allowed, reason = role_can_be_assigned(ctx, role)
+    if not allowed:
+        await ctx.send(reason)
+        return
+
+    if await charge_wallet(ctx.author, price) is None:
+        await ctx.send("เงินไม่พอ # จ น")
+        return
+
+    try:
+        await member.add_roles(role)
+    except (discord.Forbidden, discord.HTTPException):
+        await update_bank(ctx.author, price)
+        await ctx.send("ให้ role ไม่สำเร็จ คืนเงินแล้ว")
+        return
+
+    await ctx.send(f"{member} was given {role}")
 
 
 @bot.event
@@ -224,7 +266,7 @@ async def calR(ctx,a:int,b:int):
     height = b
     cal = width * height
     em = discord.Embed(title="$calR = width * height",color = discord.Color.green())
-    em.set_footer(text = f'พื้นที่ของรูปสี่เหลื่ยม{width} * {height} = {cal}',icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = f'พื้นที่ของรูปสี่เหลื่ยม{width} * {height} = {cal}',icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 
 @bot.command()
@@ -233,7 +275,7 @@ async def calT(ctx,a:int,b:int):
     height = b
     cal =  side * height / 2
     em = discord.Embed(title="$cal",color = discord.Color.green())
-    em.set_footer(text = f'พื้นที่รูปสี่เหลี่ยมคางหมู{side} * {height} = {cal}',icon_url="https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = f'พื้นที่รูปสี่เหลี่ยมคางหมู{side} * {height} = {cal}',icon_url=BOT_ICON_URL)
     await ctx.send(embed = em)
 
 
@@ -245,7 +287,7 @@ async def mrp(ctx):
     em = discord.Embed(title = f"หนังที่ดีสำหรับ {ctx.author.name}",color = discord.Color.green())
     em.add_field(name = "ห นั ง คุ ณ ภ า พ",value= rec)
     em.set_thumbnail(url = f"https://image.freepik.com/free-vector/isometric-cinema-icon-set_1284-18691.jpg")
-    em.set_footer(text = "ขอให้สนุกน้าาาาา",icon_url = "https://image.similarpng.com/very-thumbnail/2020/06/Icon-like-button-transparent-PNG.png")
+    em.set_footer(text = "ขอให้สนุกน้าาาาา",icon_url = LIKE_ICON_URL)
     await ctx.send(embed=em)
 @bot.command()
 @commands.has_any_role('DEV')
@@ -297,7 +339,7 @@ async def calC(ctx,*,text):
     r = float(text)
     cal = 3.14 * r**2
     em = discord.Embed(title="$calC = pi * radius^2",color = discord.Color.green())
-    em.set_footer(text = f'พื้นที่วงกลม {r} * {3.14} = {cal}',icon_url="https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = f'พื้นที่วงกลม {r} * {3.14} = {cal}',icon_url=BOT_ICON_URL)
     await ctx.send(embed = em)
 @bot.command()
 async def Backpack(ctx):
@@ -390,63 +432,13 @@ async def QM(ctx):
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_messages=True)
 async def shop(ctx,member:discord.Member = None,*,role:discord.Role = None):
-    await open_account(ctx.author)
-    if member is None:
-        await ctx.send("ใส่ชื่อที่จะซื้อของให้")
-        return
-    if role is None:
-        await ctx.send("ใส่สิ่งของที่ต้องการ")
-        return
-
-    allowed, reason = role_can_be_assigned(ctx, role)
-    if not allowed:
-        await ctx.send(reason)
-        return
-
-    price = 1000
-    if await charge_wallet(ctx.author, price) is None:
-        await ctx.send("เงินไม่พอ # จ น")
-        return
-
-    try:
-        await member.add_roles(role)
-    except (discord.Forbidden, discord.HTTPException):
-        await update_bank(ctx.author, price)
-        await ctx.send("ให้ role ไม่สำเร็จ คืนเงินแล้ว")
-        return
-
-    await ctx.send(f"{member} was given {role}")
+    await buy_role(ctx, member, role, price=1000)
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 @commands.has_any_role('Profile')
 async def BD(ctx,member:discord.Member = None,*,role:discord.Role = None):
-    await open_account(ctx.author)
-    if member is None:
-        await ctx.send("ใส่ชื่อที่จะซื้อของให้")
-        return
-    if role is None:
-        await ctx.send("ใส่สิ่งของที่ต้องการ")
-        return
-
-    allowed, reason = role_can_be_assigned(ctx, role)
-    if not allowed:
-        await ctx.send(reason)
-        return
-
-    price = 100000
-    if await charge_wallet(ctx.author, price) is None:
-        await ctx.send("เงินไม่พอ # จ น")
-        return
-
-    try:
-        await member.add_roles(role)
-    except (discord.Forbidden, discord.HTTPException):
-        await update_bank(ctx.author, price)
-        await ctx.send("ให้ role ไม่สำเร็จ คืนเงินแล้ว")
-        return
-
-    await ctx.send(f"{member} was given {role}")
+    await buy_role(ctx, member, role, price=100000)
 
 
 @bot.command()
@@ -472,9 +464,13 @@ async def profile(ctx,member:discord.Member = None):
 async def slot(ctx,amount = None):
     await open_account(ctx.author)
 
-    amount = parse_positive_int(amount)
+    amount = await parse_amount_or_reply(
+        ctx,
+        amount,
+        "ใส่เงินที่พนันด้วยสิเฮ้ย!",
+        "เงินเดิมพันต้องเป็นตัวเลข 1 ถึง 1,000,000",
+    )
     if amount is None:
-        await ctx.send("ใส่เงินที่พนันด้วยสิเฮ้ย!")
         return
     bal = await get_balance(ctx.author)
     max_loss = 20 * amount
@@ -482,16 +478,13 @@ async def slot(ctx,amount = None):
         await ctx.send("เงินไม่พอ # จ น")
         return
 
-    final = []
-    for i in range(3):
-        a = random.choice(["🍎","🍊","🍐"])
-        final.append(a)
+    final = [random.choice(SLOT_SYMBOLS) for _ in range(3)]
 
     message = await ctx.send("Slot Begin!")
     await asyncio.sleep(1)
     x = 0
     while x < 5:
-        await message.edit(content = random.choice(["🍎🍊🍐","🍊🍐🍎","🍐🍎🍊"]))
+        await message.edit(content = random.choice(SLOT_SPIN_FRAMES))
         await asyncio.sleep(0.2)
         x += 1
     await message.edit(content = ''.join(final))
@@ -505,9 +498,13 @@ async def slot(ctx,amount = None):
 async def withdraw(ctx,amount = None):
     await open_account(ctx.author)
 
-    amount = parse_positive_int(amount)
+    amount = await parse_amount_or_reply(
+        ctx,
+        amount,
+        "ใส่เงินที่ฝากด้วยสิเฮ้ย!",
+        "จำนวนเงินต้องเป็นตัวเลข 1 ถึง 1,000,000",
+    )
     if amount is None:
-        await ctx.send("ใส่เงินที่ฝากด้วยสิเฮ้ย!")
         return
     if await transfer_funds(ctx.author, amount, "bank", "wallet") is None:
         await ctx.send("เงินไม่พอ # จ น ")
@@ -533,9 +530,13 @@ async def leaderboard(ctx,x = 3):
 async def deposit(ctx,amount = None):
     await open_account(ctx.author)
 
-    amount = parse_positive_int(amount)
+    amount = await parse_amount_or_reply(
+        ctx,
+        amount,
+        "ใส่เงินที่ถอนด้วยสิเฮ้ย!",
+        "จำนวนเงินต้องเป็นตัวเลข 1 ถึง 1,000,000",
+    )
     if amount is None:
-        await ctx.send("ใส่เงินที่ถอนด้วยสิเฮ้ย!")
         return
     if await transfer_funds(ctx.author, amount, "wallet", "bank") is None:
         await ctx.send("เงินไม่พอ # จ น ")
@@ -580,9 +581,9 @@ async def update_bank(user,change = 0,mode = "wallet"):
 @bot.command()
 async def invite(ctx):
     em = discord.Embed(title = f"BOB's BOBCOIN",color = discord.Color.purple())
-    em.add_field(name = "BOBCOIN",value="https://discord.com/api/oauth2/authorize?client_id=880963590289498142&permissions=268823616&scope=bot")
-    em.set_thumbnail(url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
-    em.set_footer(text = "บ อ ท แ ห่ ง ช น ชั้ น",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.add_field(name = "BOBCOIN",value=INVITE_URL)
+    em.set_thumbnail(url = BOT_ICON_URL)
+    em.set_footer(text = "บ อ ท แ ห่ ง ช น ชั้ น",icon_url = BOT_ICON_URL)
     await ctx.send(embed=em)
 
 @bot.command()
@@ -596,7 +597,7 @@ async def item(ctx):
 @bot.command()
 async def TC(ctx):
     em = discord.Embed(title = f"BOB's BOBCOIN",description = "Test Command For Develop New Feature",colour = discord.Color.green())
-    em.set_author(name = "Discord.py Command",icon_url="https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_author(name = "Discord.py Command",icon_url=BOT_ICON_URL)
     em.add_field(name = "DTC ตามด้วยข้อความ [TC]",value = "Test image(TYPE TEXT) manipulation",inline = False)
     em.add_field(name = "stonk ตามด้วย@user [TC]",value = "Test image(TYPE USER) manipulation",inline = False)
     em.add_field(name = "ER [TC]",value = "Test Message Edit",inline = False)
@@ -604,12 +605,12 @@ async def TC(ctx):
     em.add_field(name = "wait [TC]",value = "Test Asyncio",inline = False)
     em.add_field(name = "reaction [TC]",value = "Test Reaction",inline = False)
     em.set_thumbnail(url = "https://i.pinimg.com/originals/e1/59/25/e15925c931a81678a3c2e0c0a40db781.gif")
-    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 @bot.command()
 async def ECO(ctx):
     em = discord.Embed(title = f"BOB's BOBCOIN",description = "BOB Economy command",colour = discord.Color.orange())
-    em.set_author(name = "Economy Command",icon_url="https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_author(name = "Economy Command",icon_url=BOT_ICON_URL)
     em.add_field(name = "deposit [ECO]",value = "Deposit BOBCOIN Feature",inline = False)
     em.add_field(name = "withdraw [ECO]",value = "Withdraw From BOB Bank Feature",inline = False)
     em.add_field(name = "Backpack [ECO]",value = "Check Your Backpack Feature",inline = False)
@@ -621,7 +622,7 @@ async def ECO(ctx):
     em.add_field(name = "item [FT]",value="Item Feature",inline = False)
     em.add_field(name = "QM [FT]",value = "Quick Math Feature",inline = False)
     em.set_thumbnail(url = "https://i.pinimg.com/originals/de/4a/90/de4a9060d587b1e7d18d2048c1eec080.gif")
-    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 
 @bot.command()
@@ -635,7 +636,7 @@ async def FT(ctx):
     em.add_field(name = "ind [FT]",value= "Introduce To Make Profile Card",inline = False)
     em.add_field(name = "botinfo [FT]",value="Information About BOB's BOBCOIN",inline = False)
     em.set_thumbnail(url = "http://shardacomputerngp.com/images/header/horoscope.gif")
-    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 @bot.command()
 async def INFO(ctx):
@@ -645,20 +646,20 @@ async def INFO(ctx):
     em.add_field(name = "ping [INFO]",value = "Check Bot's Ping",inline=False)
     em.add_field(name = "github [INFO]",value="Github BOB's BOBCOIN Feature",inline = False)
     em.set_thumbnail(url = "https://i.pinimg.com/originals/f8/5f/55/f85f55221962f0c1100496ffc0898d40.gif")
-    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |)",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |)",icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 @bot.command()
 async def command(ctx):
     em = discord.Embed(title = "Info",
         description = f"prefix {COMMAND_PREFIX}\nคำสั่งตามด้วย[TC] = Test Command\nคำสั่งตามด้วย[FT] = Feature Command\nคำสั่งตามด้วย[ECO] = Economy Feature",
         color = discord.Color.dark_blue())
-    em.set_author(name = "BOBCOIN COMMANDS",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_author(name = "BOBCOIN COMMANDS",icon_url = BOT_ICON_URL)
     em.add_field(name = "FT",value = "Feature Command",inline = False)
     em.add_field(name = "TC",value = "Test Command",inline = False)
     em.add_field(name = "ECO",value = "Economy Command",inline = False)
     em.add_field(name = "INFO",value = "Information Command",inline = False)
     em.set_thumbnail(url = "https://cdnb.artstation.com/p/assets/images/images/010/982/795/original/valerian-pranata-file2.gif?1527245408")
-    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png")
+    em.set_footer(text = "| บ อ ท แ ห่ ง ช น ชั้ น น |",icon_url = BOT_ICON_URL)
     await ctx.send(embed = em)
 @bot.command(aliases=["flipcoin"])
 async def filpcoin(ctx,text=None,amount=None):
@@ -669,9 +670,13 @@ async def filpcoin(ctx,text=None,amount=None):
     if text not in {"1", "2"}:
         await ctx.send("กรุณาใส่เลขที่จะทาย\nหัว = 1\nก้อย = 2\nใส่เงินพนัน")
         return
-    amount = parse_positive_int(amount)
+    amount = await parse_amount_or_reply(
+        ctx,
+        amount,
+        "ใส่เงินที่พนันด้วยสิเฮ้ย!",
+        "เงินเดิมพันต้องเป็นตัวเลข 1 ถึง 1,000,000",
+    )
     if amount is None:
-        await ctx.send("ใส่เงินที่พนันด้วยสิเฮ้ย!")
         return
     bal = await get_balance(ctx.author)
     if amount > bal[0]:
