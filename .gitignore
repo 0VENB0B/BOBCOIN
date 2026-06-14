@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+.env
+*.env
+
+*.tmp
+mainbank.json.tmp
+
+picture.jpg
+Text.png
+text.png
+TID.jpg
+TID.png
