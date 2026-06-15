@@ -2,6 +2,15 @@
 
 BOBCOIN is a Discord economy bot.
 
+## Structure
+
+- `main.py`: runtime entrypoint
+- `bobcoin/bot.py`: bot factory and cog loading
+- `bobcoin/settings.py`: environment and constants
+- `bobcoin/bank.py`: atomic JSON bank storage
+- `bobcoin/components.py`: Discord Components v2 command menu
+- `bobcoin/cogs/`: command groups split by feature area
+
 ## Setup
 
 ```bash
@@ -22,3 +31,4 @@ Optional environment variables:
 
 - Keep tokens in environment variables or `.env` files. Never commit real tokens.
 - Bank data is stored in `mainbank.json` and written atomically to reduce corruption risk.
+- `discord.py==2.7.1` is required for the Components v2 command menu.
