@@ -1,0 +1,2 @@
+"""BOBCOIN Discord bot package."""
+
