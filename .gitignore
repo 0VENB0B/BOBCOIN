@@ -3,6 +3,9 @@ __pycache__/
 
 .env
 *.env
+*firebase-adminsdk*.json
+*service-account*.json
+*credentials*.json
 
 *.tmp
 mainbank.json.tmp

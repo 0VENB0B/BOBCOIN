@@ -1,2 +1,2 @@
-"""BOBCOIN Discord bot package."""
+"""GUCOIN Discord bot package."""
 

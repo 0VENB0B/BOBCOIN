@@ -1,11 +1,14 @@
 import logging
 import os
 
+from dotenv import load_dotenv
+
 from bobcoin.bot import create_bot
 from bobcoin.settings import get_token
 
 
 def main():
+    load_dotenv()
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     token = get_token()
     if not token:
