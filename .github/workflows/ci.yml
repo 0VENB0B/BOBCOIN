@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # requirements-dev.txt already includes `-r requirements.txt`
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Syntax check (py_compile)
+        run: python -m py_compile main.py bobcoin/*.py bobcoin/bank/*.py bobcoin/cogs/*.py tests/*.py
+
+      - name: Import every module
+        # Catches lazy-import typos (like the loans.py `from .ai` bug) without
+        # needing a Discord token — importing never connects.
+        run: |
+          python - <<'EOF'
+          import importlib
+          mods = [
+              "bobcoin.bot", "bobcoin.gameplay", "bobcoin.ai", "bobcoin.movies",
+              "bobcoin.components", "bobcoin.helpers", "bobcoin.settings",
+              "bobcoin.cogs.events", "bobcoin.cogs.economy", "bobcoin.cogs.fun",
+              "bobcoin.cogs.panel", "bobcoin.cogs.duel", "bobcoin.cogs.media",
+              "bobcoin.cogs.info", "bobcoin.cogs.guardian",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+          print("ALL IMPORTS OK")
+          EOF
+
+      - name: Run tests with coverage
+        run: |
+          python -m coverage run -m pytest tests/ -q
+          python -m coverage report -m --include="bobcoin/*" --fail-under=70

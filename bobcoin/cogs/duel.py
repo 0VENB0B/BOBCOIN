@@ -10,11 +10,13 @@ from ..bank import (
     get_effective_luck,
     house_receive,
     log_history,
+    max_bet_allowed,
     update_bank,
 )
+from ..games import _bj_draw, _bj_str, _bj_total, _lucky_card
 from ..helpers import parse_positive_int
+from ..gameplay import _BJView
 from ..settings import SLOT_SYMBOLS
-from .economy import _BJView, _bj_draw, _bj_str, _bj_total, _lucky_card
 
 _HOUSE_CUT = 0.05
 
@@ -114,6 +116,10 @@ class DuelCog(commands.Cog):
 
         if bet <= 0:
             await _err("จำนวนเดิมพันไม่ถูกต้อง")
+            return
+        max_bet = await max_bet_allowed()
+        if bet > max_bet:
+            await _err(f"⚠️ เดิมพันสูงสุดตอนนี้คือ **{max_bet:,}** 🪙 (กันปลาวาฬล้างคลัง)")
             return
 
         c_doc, t_doc = await asyncio.gather(_ref(challenger.id).get(), _ref(target.id).get())

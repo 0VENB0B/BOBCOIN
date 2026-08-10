@@ -20,7 +20,7 @@ def parse_positive_int(value, max_value=MAX_BET):
 async def parse_amount_or_reply(ctx, value, missing_message, invalid_message=None):
     amount = parse_positive_int(value)
     if amount is None:
-        message = missing_message if value is None else (invalid_message or missing_message)
+        message = missing_message if value is None else (invalid_message or f"จำนวนต้องเป็นตัวเลข 1 ถึง {MAX_BET:,}")
         await ctx.send(message)
         return None
     return amount

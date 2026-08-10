@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import discord
 from discord.ext import commands
@@ -10,37 +9,40 @@ from ..bank import (
     calc_interest,
     get_achievements,
     get_bank_data,
+    get_cooldown,
     get_history,
     get_house_data,
     get_jackpot_pool,
     get_total_outstanding_loans,
+    house_status_band,
+    set_cooldown,
     try_daily,
     user_deposit,
     user_withdraw,
     xp_to_level,
 )
 from ..helpers import parse_positive_int
-from .economy import (
+from ..gameplay import (
+    _HOUSE_BAND_COLORS,
     _PanelCtx,
     _get_game_streak,
     _run_bj,
     _run_flip,
     _run_lottery,
     _run_slot,
-    _streak_effects,
 )
+from ..games import _streak_effects
 
-# Per-user cooldowns (mirrors prefix command limits)
+# Per-user cooldowns (mirrors prefix command limits) — persisted in Firestore
 _PANEL_CD = {"slot": 30, "flip": 15, "bj": 20, "lottery": 120}
-_panel_cd: dict[int, dict[str, float]] = {}
 
 
-def _cd_remaining(user_id: int, game: str) -> float:
-    return max(_PANEL_CD[game] - (time.time() - _panel_cd.get(user_id, {}).get(game, 0)), 0)
+async def _cd_remaining(user_id: int, game: str) -> float:
+    return await get_cooldown(user_id, f"panel_{game}", _PANEL_CD[game])
 
 
-def _cd_set(user_id: int, game: str) -> None:
-    _panel_cd.setdefault(user_id, {})[game] = time.time()
+async def _cd_set(user_id: int, game: str) -> None:
+    await set_cooldown(user_id, f"panel_{game}")
 
 
 async def _is_registered(user_id: int) -> bool:
@@ -51,14 +53,8 @@ async def _build_panel_embed() -> discord.Embed:
     hd = await get_house_data()
     jackpot = await get_jackpot_pool()
     bal = hd["balance"]
-    if bal >= 10_000_000:
-        status, color = "🟢 ร่ำรวยมาก", discord.Color.green()
-    elif bal >= 1_000_000:
-        status, color = "🟡 พอไปได้", discord.Color.yellow()
-    elif bal >= 100_000:
-        status, color = "🟠 เริ่มสั่นคลอน", discord.Color.orange()
-    else:
-        status, color = "🔴 แทบล้มละลาย", discord.Color.red()
+    tier, status_label, status_icon = house_status_band(bal)
+    status, color = f"{status_icon} {status_label}", _HOUSE_BAND_COLORS[tier]
 
     em = discord.Embed(
         title="🎰  G U C O I N   C A S I N O",
@@ -100,7 +96,7 @@ class _SlotModal(discord.ui.Modal, title="🎰 สล็อต"):
         if not bet:
             await interaction.response.send_message("💸 จำนวนเงินไม่ถูกต้อง (1–1,000,000,000)", ephemeral=True)
             return
-        _cd_set(interaction.user.id, "slot")
+        await _cd_set(interaction.user.id, "slot")
         await interaction.response.defer(thinking=False)
         await _run_slot(_PanelCtx(interaction.channel, interaction.user), bet)
 
@@ -122,7 +118,7 @@ class _FlipModal(discord.ui.Modal, title="🪙 หัว/ก้อย"):
         if not bet:
             await interaction.response.send_message("💸 จำนวนเงินไม่ถูกต้อง", ephemeral=True)
             return
-        _cd_set(interaction.user.id, "flip")
+        await _cd_set(interaction.user.id, "flip")
         await interaction.response.defer(thinking=False)
         await _run_flip(_PanelCtx(interaction.channel, interaction.user), bet, side)
 
@@ -135,7 +131,7 @@ class _BJModal(discord.ui.Modal, title="🃏 แบล็คแจ็ค"):
         if not bet:
             await interaction.response.send_message("💸 จำนวนเงินไม่ถูกต้อง", ephemeral=True)
             return
-        _cd_set(interaction.user.id, "bj")
+        await _cd_set(interaction.user.id, "bj")
         await interaction.response.defer(thinking=False)
         await _run_bj(_PanelCtx(interaction.channel, interaction.user), bet)
 
@@ -153,7 +149,7 @@ class _LotteryModal(discord.ui.Modal, title="🎟️ หวย 5 ตัว"):
         if not bet:
             await interaction.response.send_message("💸 จำนวนเงินไม่ถูกต้อง", ephemeral=True)
             return
-        _cd_set(interaction.user.id, "lottery")
+        await _cd_set(interaction.user.id, "lottery")
         await interaction.response.defer(thinking=False)
         await _run_lottery(_PanelCtx(interaction.channel, interaction.user), bet, tkt)
 
@@ -257,7 +253,7 @@ class GamePanelView(discord.ui.View):
             )
             return False
         if game:
-            rem = _cd_remaining(interaction.user.id, game)
+            rem = await _cd_remaining(interaction.user.id, game)
             if rem > 0:
                 await interaction.response.send_message(
                     f"⏳ รืออีก **{rem:.0f}** วินาที",
@@ -453,21 +449,14 @@ class GamePanelView(discord.ui.View):
     @discord.ui.button(label="🏛️ คลัง", style=discord.ButtonStyle.secondary, custom_id="panel:house", row=2)
     async def house_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        import asyncio
         (hd, jackpot), outstanding = await asyncio.gather(
             asyncio.gather(get_house_data(), get_jackpot_pool()),
             get_total_outstanding_loans(),
         )
         bal, tin, tout = hd["balance"], hd["total_in"], hd["total_out"]
         profit = (tin - tout) + outstanding
-        if bal >= 10_000_000:
-            color, status = discord.Color.green(), "🟢 ร่ำรวยมาก"
-        elif bal >= 1_000_000:
-            color, status = discord.Color.yellow(), "🟡 พอไปได้"
-        elif bal >= 100_000:
-            color, status = discord.Color.orange(), "🟠 เริ่มสั่นคลอน"
-        else:
-            color, status = discord.Color.red(), "🔴 แทบล้มละลาย"
+        tier, status_label, status_icon = house_status_band(bal)
+        color, status = _HOUSE_BAND_COLORS[tier], f"{status_icon} {status_label}"
         em = discord.Embed(title="🏛️ คลังหลวง GUCOIN", color=color)
         em.add_field(name="💰 ยอดคงเหลือ", value=f"**{bal:,}** 🪙", inline=True)
         em.add_field(name="สถานะ", value=status, inline=True)

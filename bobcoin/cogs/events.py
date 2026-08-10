@@ -35,6 +35,8 @@ _HALF_KW   = ["ครึ่ง", "half", "ครึ่งนึง"]
 
 
 def _parse_intent(text: str) -> dict | None:
+    if not text:
+        return None
     t = text.lower()
     game = next((g for g, kws in _GAME_KEYWORDS.items() if any(k in t for k in kws)), None)
     if not game:
