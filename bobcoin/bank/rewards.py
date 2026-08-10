@@ -4,7 +4,18 @@ import random
 from datetime import UTC, datetime
 from math import isqrt
 
-from .core import _Abort, _get_db, _house_ref, _in_txn, _positive_amount, _ref, house_payout, log_history, update_bank
+from .core import (
+    _Abort,
+    _get_db,
+    _house_ref,
+    _in_txn,
+    _positive_amount,
+    _ref,
+    _with_total,
+    house_payout,
+    log_history,
+    update_bank,
+)
 
 # ── Interest ─────────────────────────────────────────────────────────────────
 
@@ -148,7 +159,7 @@ async def try_daily(user_id: int) -> tuple[int, int] | bool | None:
         if actual <= 0:
             raise _Abort(False)   # house empty → caller gets False
         wallet = int(d.get("wallet", 0))
-        t.set(user_ref, {"wallet": wallet + actual, "last_daily": now, "daily_streak": streak}, merge=True)
+        t.set(user_ref, _with_total({"wallet": wallet + actual, "last_daily": now, "daily_streak": streak}, d), merge=True)
         t.set(house_ref, {
             "balance": house_bal - actual,
             "total_out": int(hd.get("total_out", 0)) + actual,

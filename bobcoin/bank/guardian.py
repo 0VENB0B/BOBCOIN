@@ -11,6 +11,7 @@ from .core import (
     _house_ref,
     _in_txn,
     _ref,
+    _with_total,
     get_house_balance,
     get_house_data,
     log_history,
@@ -166,7 +167,7 @@ async def guardian_force_collect(pct: float = 0.10) -> tuple[int, int]:
             actual = min(_take, w2, lb2)
             if actual <= 0:
                 raise _Abort()
-            t.set(_ur, {"wallet": w2 - actual, "loan_balance": lb2 - actual}, merge=True)
+            t.set(_ur, _with_total({"wallet": w2 - actual, "loan_balance": lb2 - actual}, sd), merge=True)
             t.set(_hr, {
                 "balance":  int(hd.get("balance", 0)) + actual,
                 "total_in": int(hd.get("total_in", 0)) + actual,

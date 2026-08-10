@@ -23,6 +23,7 @@ from .core import (
     _parse,
     _positive_amount,
     _ref,
+    _with_total,
     charge_wallet,
     get_balance,
     get_bank_data,
@@ -30,6 +31,7 @@ from .core import (
     get_history,
     get_house_balance,
     get_house_data,
+    get_leaderboard,
     has_transfer_relation,
     house_payout,
     house_receive,
@@ -84,6 +86,7 @@ from .rewards import (
     try_daily,
     xp_to_level,
 )
+from .stats import get_game_stats, record_game_outcome
 
 __all__ = [
     "ACHIEVEMENTS",
@@ -100,6 +103,7 @@ __all__ = [
     "_parse",
     "_positive_amount",
     "_ref",
+    "_with_total",
     "accrue_loan_interest",
     "add_xp",
     "ai_loan_limit",
@@ -113,11 +117,13 @@ __all__ = [
     "get_bank_health",
     "get_cooldown",
     "get_effective_luck",
+    "get_game_stats",
     "get_history",
     "get_house_balance",
     "get_house_data",
     "get_house_debt",
     "get_jackpot_pool",
+    "get_leaderboard",
     "get_loan_info",
     "get_lucky_users",
     "get_total_outstanding_loans",
@@ -138,6 +144,7 @@ __all__ = [
     "max_bet_allowed",
     "open_account",
     "pay_interest_all",
+    "record_game_outcome",
     "repay_loan",
     "rob_transfer",
     "set_cooldown",

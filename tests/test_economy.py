@@ -24,6 +24,7 @@ from bobcoin.bank import (
     house_receive,
     is_registered,
     open_account,
+    record_game_outcome,
     set_cooldown,
     update_bank,
 )
@@ -647,6 +648,24 @@ def test_house_command_shows_stats():
         names = [f.name for f in em.fields]
         assert "💰 ยอดคงเหลือ" in names
         assert "📊 กำไรสุทธิ" in names
+    run(scenario())
+
+
+def test_stats_command_shows_win_rate_and_empty():
+    async def scenario():
+        ctx = _Ctx(_Member(1))
+        await invoke_command(_cog(_Bot()), "stats", ctx)
+        assert any("ยังไม่มีสถิติเกม" in s[0][0] for s in ctx.sent)
+
+        await record_game_outcome("slot", 1_000, -1_000)
+        await record_game_outcome("slot", 1_000, 7_000)
+        ctx2 = _Ctx(_Member(1))
+        await invoke_command(_cog(_Bot()), "stats", ctx2)
+        em = ctx2.sent[0][1]["embed"]
+        values = " ".join(f.value for f in em.fields)
+        assert "slot" in em.fields[0].name
+        assert "2" in values and "50.0%" in values      # 2 games, 1 house win
+        assert "jackpot base" in em.footer.text
     run(scenario())
 
 

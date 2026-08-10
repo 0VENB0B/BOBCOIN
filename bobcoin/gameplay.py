@@ -22,11 +22,12 @@ from .bank import (
     house_receive,
     log_history,
     max_bet_allowed,
+    record_game_outcome,
     trigger_jackpot,
     update_bank,
 )
 from .games import _bj_draw, _bj_str, _bj_total, _lucky_card, _streak_effects
-from .settings import SLOT_SYMBOLS
+from .settings import SLOT_JACKPOT_BASE, SLOT_SYMBOLS
 
 logger = logging.getLogger("bobcoin.gameplay")
 
@@ -193,7 +194,7 @@ async def _run_slot(ctx, amount: int) -> None:
     jackpot_contrib = max(amount // 100, 1)
     jackpot_pool_task = _spawn(contribute_jackpot(jackpot_contrib))
 
-    _BASE_JP = 8 / 512
+    _BASE_JP = SLOT_JACKPOT_BASE
     user_luck = await get_effective_luck(ctx.author.id)
     if random.random() < min(_BASE_JP * user_luck, 0.99):
         s = random.choice(SLOT_SYMBOLS)
@@ -310,10 +311,11 @@ async def _run_slot(ctx, amount: int) -> None:
     elif is_two_match:
         actual = await house_payout(amount)
         await update_bank(ctx.author, actual)
+        net = actual - amount
         em.add_field(name=label, value=f"คืนทุน **{actual:,}** 🪙", inline=True)
         if commentary:
             em.add_field(name="​", value=f"*{commentary}*", inline=False)
-        _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "near", "multiplier": 0, "net": actual - amount}))
+        _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "near", "multiplier": 0, "net": net}))
     else:
         net = -amount
         em.add_field(name=label, value=f"**-{amount:,}** 🪙", inline=True)
@@ -328,6 +330,7 @@ async def _run_slot(ctx, amount: int) -> None:
 
     em.set_footer(text=f"{ctx.author.display_name}  •  เดิมพัน {amount:,} เหรียญ")
     await msg.edit(embed=em)
+    _spawn(record_game_outcome("slot", amount, net))
     _spawn(_post_game(ctx, amount, is_jackpot, streak, streak_is_win, ach_keys))
 
 
@@ -412,6 +415,7 @@ async def _run_flip(ctx, amount: int, side: str) -> None:
     em.set_footer(text=f"{ctx.author.display_name}  •  เลือก {choice_name} {choice_icon}  •  เดิมพัน {amount:,} 🪙")
     await msg.edit(embed=em)
 
+    _spawn(record_game_outcome("flip", amount, net))
     _spawn(log_history(ctx.author.id, {"cmd": "flip", "bet": amount, "choice": choice_name, "drawn": drawn_name, "win": win, "net": net}))
     flip_ach = []
     if amount >= 1_000_000:
@@ -536,6 +540,7 @@ async def _run_lottery(ctx, ticket_cost: int, text: str) -> None:
 
     em.set_footer(text=f"เดิมพัน {ticket_cost:,} 🪙")
     await msg.edit(embed=em)
+    _spawn(record_game_outcome("lottery", ticket_cost, net))
     _spawn(log_history(ctx.author.id, {"cmd": "lottery", "bet": ticket_cost, "pick": text, "drawn": drawn_str, "match": match, "net": net}))
     lot_ach = []
     if ticket_cost >= 1_000_000:
@@ -592,6 +597,7 @@ async def _run_bj(ctx, amount: int) -> None:
             em = _bj_embed(player, dealer, False, "🤝 **Push** — คืนทุน", discord.Color.orange())
             ach = []
         await ctx.send(embed=em)
+        _spawn(record_game_outcome("bj", amount, net))
         _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "blackjack", "net": net}))
         _spawn(_post_game(ctx, amount, net > 0, 0, False, ach))
         return
@@ -612,6 +618,7 @@ async def _run_bj(ctx, amount: int) -> None:
         net = -amount
         em = _bj_embed(player, dealer, False, f"💥 **BUST!**  **-{amount:,}** 🪙", discord.Color.red())
         await msg.edit(embed=em, view=None)
+        _spawn(record_game_outcome("bj", amount, net))
         _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "bust", "net": net}))
         _spawn(_post_game(ctx, amount, False, 0, False, ["high_roller"] if amount >= 1_000_000 else []))
         return
@@ -646,6 +653,7 @@ async def _run_bj(ctx, amount: int) -> None:
         result = "lose"
 
     await msg.edit(embed=em, view=None)
+    _spawn(record_game_outcome("bj", amount, net))
     _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "p": p_total, "d": d_total, "result": result, "net": net}))
     _spawn(_post_game(ctx, amount, net > 0, 0, False, ach))
 

@@ -19,10 +19,12 @@ from bobcoin.bank import (
     get_achievements,
     get_balance,
     get_bank_data,
+    get_game_stats,
     get_house_balance,
     get_house_data,
     get_house_debt,
     get_jackpot_pool,
+    get_leaderboard,
     get_loan_info,
     get_total_outstanding_loans,
     grant_achievement,
@@ -34,7 +36,9 @@ from bobcoin.bank import (
     max_bet_allowed,
     open_account,
     pay_interest_all,
+    record_game_outcome,
     repay_loan,
+    rob_transfer,
     take_loan,
     transfer_to_user,
     trigger_jackpot,
@@ -403,4 +407,127 @@ def test_outstanding_loans_cache():
         # cache cleared → refetch sees the new loan
         bank._cache.clear()
         assert await get_total_outstanding_loans() == 6_000
+    run(scenario())
+
+
+# ── Leaderboard denormalization (P2 #10) ────────────────────────────────
+
+def test_total_field_maintained_on_every_money_write():
+    """Every money-mutating path keeps `total` (wallet+deposited) in sync."""
+    async def scenario():
+        u = _User(1)
+        await open_account(u)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 0
+
+        await update_bank(u, 1_000)                      # wallet only
+        assert (await bank._ref(1).get()).to_dict()["total"] == 1_000
+
+        await user_deposit(u, 400)                       # wallet→deposited (total unchanged)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 1_000
+
+        await user_withdraw(u, 200)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 1_000
+
+        await open_account(_User(2))
+        await transfer_to_user(u, _User(2), 100)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 900
+        assert (await bank._ref(2).get()).to_dict()["total"] == 100
+
+        await rob_transfer(_User(2), u, 50)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 850
+        assert (await bank._ref(2).get()).to_dict()["total"] == 150
+    run(scenario())
+
+
+def test_total_field_survives_loans_daily_and_force_collect():
+    async def scenario():
+        await house_receive(10_000_000)
+        await open_account(_User(1))
+        await update_bank(1, 1_000)
+        await take_loan(1, 5_000)                        # wallet += 5k
+        assert (await bank._ref(1).get()).to_dict()["total"] == 6_000
+        await repay_loan(1, 2_000)
+        assert (await bank._ref(1).get()).to_dict()["total"] == 4_000
+        await try_daily(1)                               # wallet += reward
+        assert (await bank._ref(1).get()).to_dict()["total"] > 4_000
+        # force collect pulls wallet → total must shrink with it
+        store = bank_core._db._store
+        store["users/1"]["wallet"] = 0
+        store["users/1"]["total"] = store["users/1"]["wallet"] + store["users/1"]["deposited"]
+        from bobcoin.bank import guardian_force_collect
+        await update_bank(1, 3_000)
+        await guardian_force_collect(1.0)                # take all wallet to repay loan
+        d = (await bank._ref(1).get()).to_dict()
+        assert d["total"] == d["wallet"] + d["deposited"]
+    run(scenario())
+
+
+def test_total_field_keeps_deposited_after_loan_and_daily():
+    """Regression: writes that omit `deposited` (loan/daily/force-collect) must
+    still produce a correct total — the old _with_total read only the new fields
+    and silently zeroed deposited for users with savings."""
+    async def scenario():
+        await house_receive(10_000_000)
+        u = _User(1)
+        await open_account(u)
+        await update_bank(u, 50_000)
+        await user_deposit(u, 20_000)                    # deposited = 20k
+        assert (await bank._ref(1).get()).to_dict()["total"] == 50_000
+
+        await take_loan(1, 5_000)                        # wallet += 5k, no deposited in fields
+        d = (await bank._ref(1).get()).to_dict()
+        assert d["total"] == d["wallet"] + d["deposited"] == 55_000
+
+        await repay_loan(1, 2_000)
+        d = (await bank._ref(1).get()).to_dict()
+        assert d["total"] == d["wallet"] + d["deposited"] == 53_000
+
+        await try_daily(1)
+        d = (await bank._ref(1).get()).to_dict()
+        assert d["total"] == d["wallet"] + d["deposited"]
+        assert d["total"] > 53_000                       # reward added to wallet
+    run(scenario())
+
+
+def test_leaderboard_returns_richest_first():
+    async def scenario():
+        for uid, w in ((1, 1_000), (2, 9_000), (3, 5_000)):
+            await open_account(_User(uid))
+            await update_bank(uid, w)
+        entries = await get_leaderboard(3)
+        assert [uid for uid, _ in entries] == [2, 3, 1]
+        assert entries[0][1]["wallet"] == 9_000
+        # limit respected
+        assert len(await get_leaderboard(2)) == 2
+    run(scenario())
+
+
+def test_leaderboard_counts_deposited_as_wealth():
+    async def scenario():
+        await open_account(_User(1))
+        await update_bank(1, 1_000)
+        await user_deposit(_User(1), 500)                # total stays 1_000
+        await open_account(_User(2))
+        await update_bank(2, 900)
+        entries = await get_leaderboard(2)
+        # user 1 (1_000) ranks above user 2 (900)
+        assert entries[0][0] == 1 and entries[1][0] == 2
+    run(scenario())
+
+
+# ── Game stats (P2 #8) ───────────────────────────────────────────────────
+
+def test_record_game_outcome_and_stats():
+    async def scenario():
+        assert await get_game_stats() == {}
+        await record_game_outcome("slot", 1_000, -1_000)   # house win
+        await record_game_outcome("slot", 1_000, 7_000)    # player win
+        await record_game_outcome("flip", 500, -500)
+        s = await get_game_stats("slot")
+        assert s["games"] == 2
+        assert s["house_wins"] == 1
+        assert s["bets"] == 2_000
+        assert s["house_net"] == 1_000 - 7_000 == -6_000
+        assert (await get_game_stats())["flip"]["games"] == 1
+        assert await get_game_stats("bj") == {"games": 0, "house_wins": 0, "bets": 0, "house_net": 0}
     run(scenario())

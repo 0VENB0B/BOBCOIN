@@ -9,11 +9,11 @@ from ..bank import (
     _ref,
     calc_interest,
     get_achievements,
-    get_bank_data,
     get_cooldown,
     get_history,
     get_house_data,
     get_jackpot_pool,
+    get_leaderboard,
     get_total_outstanding_loans,
     house_status_band,
     set_cooldown,
@@ -34,6 +34,7 @@ from ..gameplay import (
 )
 from ..games import _streak_effects
 from ..helpers import parse_positive_int
+from ..settings import AUDIT_CHANNEL_ID
 
 # Per-user cooldowns (mirrors prefix command limits) — persisted in Firestore
 _PANEL_CD = {"slot": 30, "flip": 15, "bj": 20, "lottery": 120}
@@ -472,20 +473,17 @@ class GamePanelView(discord.ui.View):
     @discord.ui.button(label="🥇 อันดับ", style=discord.ButtonStyle.secondary, custom_id="panel:lb", row=2)
     async def lb_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        users = await get_bank_data()
-        totals = sorted(
-            ((int(a.get("wallet", 0)) + int(a.get("deposited", a.get("bank", 0))), int(uid)) for uid, a in users.items()),
-            reverse=True,
-        )
+        entries = await get_leaderboard(5)
         em = discord.Embed(title="🥇 Top 5 ผู้มั่งคั่ง", color=discord.Color.purple())
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        for i, (amt, uid) in enumerate(totals[:5], 1):
+        for i, (uid, data) in enumerate(entries, 1):
+            amt = int(data.get("wallet", 0)) + int(data.get("deposited", data.get("bank", 0)))
             try:
                 user = interaction.client.get_user(uid) or await interaction.client.fetch_user(uid)
                 name = user.display_name
             except Exception:
                 name = f"User {uid}"
-            lv = xp_to_level(int(users.get(str(uid), {}).get("xp", 0)))
+            lv = xp_to_level(int(data.get("xp", 0)))
             em.add_field(
                 name=f"{medals.get(i, f'**#{i}**')} {name}",
                 value=f"{amt:,} 🪙  •  ⭐ Lv.{lv}",
@@ -530,12 +528,35 @@ class PanelCog(commands.Cog):
     @staticmethod
     async def _auto_delete(message: discord.Message, delay: int):
         await asyncio.sleep(delay)
+        await PanelCog._audit_copy(message)
         try:
             msg = await message.channel.fetch_message(message.id)
             if not msg.pinned:
                 await msg.delete()
         except (discord.NotFound, discord.Forbidden):
             pass
+
+    @staticmethod
+    async def _audit_copy(message: discord.Message) -> None:
+        """Copy a soon-to-be-deleted game result to the audit channel (P2 #11).
+
+        Game results vanish after 45s in the casino channel; forwarding a copy
+        to a configured channel keeps a record for disputes. No-op when
+        ``GUCOIN_AUDIT_CHANNEL_ID`` is unset or the channel is gone.
+        """
+        if not AUDIT_CHANNEL_ID:
+            return
+        guild = getattr(message, "guild", None)
+        if guild is None:
+            return
+        ch = guild.get_channel(AUDIT_CHANNEL_ID)
+        if ch is None:
+            return
+        with contextlib.suppress(discord.HTTPException, discord.Forbidden):
+            if message.embeds:
+                await ch.send(embed=message.embeds[0])
+            elif message.content:
+                await ch.send(message.content)
 
     @commands.command(aliases=["แผง", "lobby", "casino"])
     async def panel(self, ctx):

@@ -40,6 +40,10 @@ For development/testing, also install `requirements-dev.txt` (adds pytest).
 | `GUCOIN_OWNER_ID` | Optional | Bot owner Discord ID |
 | `GUCOIN_ADMIN_ROLE_IDS` | Optional | Comma-separated admin role IDs |
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
+| `GUCOIN_AUDIT_CHANNEL_ID` | Optional | Casino audit channel — copies of deleted game results are forwarded here (`0` disables) |
+| `GUCOIN_SLOT_JACKPOT_BASE` | Optional | Slot jackpot rate per spin, default `0.015625` (≈1.56%); tune from `$stats` |
+
+> A ready-to-fill template lives in `.env.example`.
 
 > Keep tokens and the service-account JSON out of git (`.gitignore` already covers
 > `.env` and `*firebase-adminsdk*.json`). The legacy `mainbank.json` (old JSON-bank
@@ -57,7 +61,10 @@ python -m pytest tests/ -v
 The suite fakes `google.cloud.firestore` entirely, so it runs offline with zero
 credentials. **460 tests** — the money layer is at ~100%, every cog including
 the interaction-heavy panel, and total `bobcoin/` coverage is **91%**
-(fail-under gate in CI):
+(fail-under gate in CI). **476 tests** covering the P2 backlog too:
+leaderboard via the denormalized `total` index (`get_leaderboard`, no collection
+scan), house win-rate stats (`record_game_outcome` / `$stats`), and the casino
+audit-copy (`GUCOIN_AUDIT_CHANNEL_ID`):
 
 - `test_bank.py` / `test_bank_edge.py` — every branch of deposit/withdraw/
   transfer/rob/loans/interest/daily/jackpot/debt incl. invalid inputs, missing
@@ -95,6 +102,10 @@ the interaction-heavy panel, and total `bobcoin/` coverage is **91%**
   full success/error paths with a faked session (network never hit)
 - `test_components.py` — the Components v2 command menu: category buttons
   (success + error callbacks) and view construction/fallback
+- P2 extras — `total`-field maintenance on every money write + indexed
+  leaderboard ordering, game-stats recording on every settled game (incl.
+  blocked games recording nothing), `$stats` embed, audit-copy forwarding when
+  configured (and no-op when not), and env parsing for the new settings
 - `test_images.py` — asset path resolution, font fallback, PNG file builder,
   avatar download/URL helpers
 

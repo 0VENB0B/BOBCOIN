@@ -20,6 +20,25 @@ BOT_ADMIN_ROLE_IDS = _parse_id_set(os.getenv("GUCOIN_ADMIN_ROLE_IDS", ""))
 MAX_BET = 1_000_000_000
 MAX_PURGE_MESSAGES = 100
 
+# Casino audit log — copy deleted game results to this channel (0 = disabled)
+def _parse_optional_int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+AUDIT_CHANNEL_ID = _parse_optional_int(os.getenv("GUCOIN_AUDIT_CHANNEL_ID", "0"))
+
+# Slot jackpot base rate (default 8/512 ≈ 1.56% per spin) — tunable without code
+# changes so the house win-rate can be rebalanced from collected stats.
+def _parse_optional_float(value: str, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+SLOT_JACKPOT_BASE = _parse_optional_float(os.getenv("GUCOIN_SLOT_JACKPOT_BASE", ""), 8 / 512)
+
 BOT_ICON_URL = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png"
 LIKE_ICON_URL = "https://image.similarpng.com/very-thumbnail/2020/06/Icon-like-button-transparent-PNG.png"
 INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=880963590289498142&permissions=268823616&scope=bot"

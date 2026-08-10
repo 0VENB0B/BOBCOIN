@@ -75,18 +75,25 @@
 
 ## 🟡 P2 — ค่อยๆ ทำ
 
-8. **ปรับสมดุลเกม** — โอกาส jackpot สล็อตปัจจุบัน `8/512 ≈ 1.56%`/สปิน อาจสูงไปเมื่อ
-   เทียบ multiplier 8x/15x/20x → เก็บสถิติ house win rate แล้วปรับ
-9. **ดอกเบี้ยเงินกู้เป็น "กำไรลมๆ"** — `accrue_loan_interest` บวกเข้า `loan_balance`
-   โดยไม่ได้มาจากคลัง แล้ว `$house` นับเป็นกำไร — ถูกต้องตามหลักธนาคาร แต่ควรแยก
-   แสดง "หนี้ค้างชำระ" กับ "กำไรจริง" ให้ชัด
-10. **Firestore cost** — ถ้า user เยอะขึ้น ให้ denormalize leaderboard (เก็บ
-    `total` field ไว้ใน doc user ตอนทำ transaction) จะเลิกสแกนทั้ง collection
-11. **casino channel auto-delete 45 วิ** — ผลเกมจะหายไปเอง; อาจเพิ่มการ log ไป
-    ช่องอื่น (audit) เผื่อ dispute
-12. **README/env docs** — `.env.example` + อธิบายตัวแปรทุกตัว
-    (`FIREBASE_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_API_KEY`,
-    `GUCOIN_PREFIX`, `GUCOIN_OWNER_ID`, `GUCOIN_ADMIN_ROLE_IDS`)
+8. ~~**ปรับสมดุลเกม**~~ ✅ ทำแล้ว (โครงสร้าง) — เพิ่ม `record_game_outcome`/
+   `get_game_stats` เก็บสถิติ house win rate ต่อเกม (slot/flip/lottery/bj) ลง
+   Firestore ทุกครั้งที่เกมจบ + `$stats` command ดูผล และ jackpot base rate ย้ายไป
+   อยู่ที่ `settings.SLOT_JACKPOT_BASE` (env `GUCOIN_SLOT_JACKPOT_BASE`) — ปรับ
+   สมดุลได้โดยไม่ต้องแก้โค้ด รอสถิติจริงสะสมแล้วค่อยปรับค่าจากข้อมูล
+9. ~~**ดอกเบี้ยเงินกู้เป็น "กำไรลมๆ"**~~ ✅ ทำแล้ว — `$house`/panel แยก field
+   "💸 ยอดหนี้ค้างชำระ" กับ "📊 กำไรสุทธิ" ชัดเจน (สูตรไม่นับเงินต้นกู้)
+10. ~~**Firestore cost**~~ ✅ ทำแล้ว — denormalize: ทุก transaction ที่แตะ
+    wallet/deposited (core/loans/rewards/guardian) เขียน `total` field กำกับไว้ใน
+    doc user ด้วย → `get_leaderboard()` ใช้ query `order_by("total", DESC)` ตัวเดียว
+    เลิกสแกนทั้ง collection (`$leaderboard` + ปุ่ม panel lb ใช้แล้ว)
+11. ~~**casino channel auto-delete 45 วิ**~~ ✅ ทำแล้ว — `_audit_copy()` ส่งสำเนา
+    embed/ข้อความของผลเกมไปช่องที่ตั้ง `GUCOIN_AUDIT_CHANNEL_ID` ก่อนถูกลบ (เผื่อ
+    dispute) — ปิดได้ด้วย 0
+12. ~~**README/env docs**~~ ✅ ทำแล้ว — สร้าง `.env.example` ครอบคลุมทุกตัวแปร
+    (`DISCORD_TOKEN`, `FIREBASE_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`,
+    `ANTHROPIC_API_KEY`, `GUCOIN_PREFIX`, `GUCOIN_OWNER_ID`,
+    `GUCOIN_ADMIN_ROLE_IDS`, `LOG_LEVEL`, + ใหม่ `GUCOIN_AUDIT_CHANNEL_ID`,
+    `GUCOIN_SLOT_JACKPOT_BASE`) และ README มีตารางอธิบายครบ
 
 ## 📌 หลักการคงไว้
 

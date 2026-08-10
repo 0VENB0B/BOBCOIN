@@ -12,6 +12,7 @@ from .core import (
     _in_txn,
     _positive_amount,
     _ref,
+    _with_total,
     get_history,
     log_history,
 )
@@ -83,7 +84,7 @@ async def take_loan(user_id: int, amount: int, ai_approved: int = 0) -> str | No
             new_fields["loan_taken_at"] = now
         if ai_approved > 0:        # persist the AI ceiling so get_loan_info sees it
             new_fields["ai_loan_ceiling"] = max(int(ud.get("ai_loan_ceiling", 0)), ai_approved)
-        t.set(user_ref, new_fields, merge=True)
+        t.set(user_ref, _with_total(new_fields, ud), merge=True)
         t.set(house_ref, {
             "balance":   int(hd.get("balance", 0)) - amount,
             "total_out": int(hd.get("total_out", 0)) + amount,
@@ -127,7 +128,7 @@ async def repay_loan(user_id: int, amount: int) -> tuple[int, str | None]:
         }
         if loan_bal - actual <= 0:
             new_fields["ai_loan_ceiling"] = 0   # full repayment resets AI headroom
-        t.set(user_ref, new_fields, merge=True)
+        t.set(user_ref, _with_total(new_fields, ud), merge=True)
         t.set(house_ref, {
             "balance":  int(hd.get("balance", 0)) + actual,
             "total_in": int(hd.get("total_in", 0)) + actual,

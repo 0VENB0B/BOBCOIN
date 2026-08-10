@@ -190,3 +190,48 @@ def test_is_bot_admin_no_roles_no_match():
     finally:
         helpers.BOT_OWNER_ID = old
         helpers.BOT_ADMIN_ROLE_IDS = old_roles
+
+
+# ── settings parsing (P2 #12 / #11 / #8) ───────────────────────────────
+
+def test_parse_optional_int_bad_value_returns_zero(monkeypatch):
+    import bobcoin.settings as settings
+    assert settings._parse_optional_int("") == 0
+    assert settings._parse_optional_int("abc") == 0
+    assert settings._parse_optional_int(None) == 0
+    assert settings._parse_optional_int("555") == 555
+
+
+def test_settings_defaults_and_env_override(monkeypatch):
+    import bobcoin.settings as settings
+    assert settings.AUDIT_CHANNEL_ID == 0            # default disabled
+    assert settings.SLOT_JACKPOT_BASE == 8 / 512     # default 1.56%
+
+
+def test_env_vars_drive_settings(monkeypatch):
+    import importlib
+
+    import bobcoin.settings as settings
+    monkeypatch.setenv("GUCOIN_AUDIT_CHANNEL_ID", "555")
+    monkeypatch.setenv("GUCOIN_SLOT_JACKPOT_BASE", "0.02")
+    importlib.reload(settings)
+    try:
+        assert settings.AUDIT_CHANNEL_ID == 555
+        assert settings.SLOT_JACKPOT_BASE == 0.02
+    finally:
+        monkeypatch.delenv("GUCOIN_AUDIT_CHANNEL_ID", raising=False)
+        monkeypatch.delenv("GUCOIN_SLOT_JACKPOT_BASE", raising=False)
+        importlib.reload(settings)
+
+
+def test_env_vars_ignore_garbage(monkeypatch):
+    import importlib
+
+    import bobcoin.settings as settings
+    monkeypatch.setenv("GUCOIN_AUDIT_CHANNEL_ID", "not-a-number")
+    importlib.reload(settings)
+    try:
+        assert settings.AUDIT_CHANNEL_ID == 0
+    finally:
+        monkeypatch.delenv("GUCOIN_AUDIT_CHANNEL_ID", raising=False)
+        importlib.reload(settings)

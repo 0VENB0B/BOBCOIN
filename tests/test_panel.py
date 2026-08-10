@@ -297,6 +297,58 @@ def test_auto_delete_swallows_missing_and_forbidden():
         asyncio.sleep = _real_sleep
 
 
+def test_audit_copy_forwards_embed_when_configured(monkeypatch):
+    class _AuditChannel:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, *a, **kw):
+            self.sent.append((a, kw))
+
+    class _Guild:
+        def __init__(self, ch):
+            self._ch = ch
+
+        def get_channel(self, cid):
+            return self._ch if cid == 555 else None
+
+    class _Msg:
+        def __init__(self, embeds, content):
+            self.embeds = embeds
+            self.content = content
+            self.guild = _Guild(_AuditChannel())
+
+    async def scenario():
+        with monkeypatch.context() as m:
+            m.setattr(panel, "AUDIT_CHANNEL_ID", 555)
+            em = discord.Embed(title="🎰 ผลเกม")
+            msg = _Msg([em], None)
+            await panel.PanelCog._audit_copy(msg)
+            ch = msg.guild.get_channel(555)
+            assert ch.sent and ch.sent[0][1]["embed"].title == "🎰 ผลเกม"
+
+            # content-only message also forwarded
+            msg2 = _Msg([], "ผลลัพธ์เกม")
+            await panel.PanelCog._audit_copy(msg2)
+            assert msg2.guild.get_channel(555).sent[-1][0][0] == "ผลลัพธ์เกม"
+    run(scenario())
+
+
+def test_audit_copy_noop_when_unset_or_missing_guild(monkeypatch):
+    async def scenario():
+        with monkeypatch.context() as m:
+            m.setattr(panel, "AUDIT_CHANNEL_ID", 0)
+            # unset → no guild access at all
+            await panel.PanelCog._audit_copy(types.SimpleNamespace(id=1))
+            # channel not found → suppressed
+            m.setattr(panel, "AUDIT_CHANNEL_ID", 555)
+            class _NoChannelGuild:
+                def get_channel(self, cid):
+                    return None
+            await panel.PanelCog._audit_copy(types.SimpleNamespace(id=1, guild=_NoChannelGuild()))
+    run(scenario())
+
+
 # ── Remaining modals ────────────────────────────────────────────────────
 
 def test_flip_modal_invalid_side_errors():

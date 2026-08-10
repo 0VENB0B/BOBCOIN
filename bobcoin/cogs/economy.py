@@ -14,11 +14,12 @@ from ..bank import (
     charge_wallet,
     get_achievements,
     get_balance,
-    get_bank_data,
     get_cooldown,
+    get_game_stats,
     get_history,
     get_house_data,
     get_jackpot_pool,
+    get_leaderboard,
     get_loan_info,
     get_total_outstanding_loans,
     get_user_luck,
@@ -52,6 +53,7 @@ from ..gameplay import (
 )
 from ..games import _streak_effects
 from ..helpers import is_bot_admin, parse_amount_or_reply, parse_positive_int
+from ..settings import SLOT_JACKPOT_BASE
 
 logger = logging.getLogger("bobcoin.economy")
 
@@ -275,29 +277,23 @@ class EconomyCog(commands.Cog):
     @commands.command(aliases=["lb"])
     async def leaderboard(self, ctx, x=3):
         x = parse_positive_int(x, max_value=10) or 3
-        users = await get_bank_data()
-        totals = sorted(
-            (
-                (int(a.get("wallet", 0)) + int(a.get("deposited", a.get("bank", 0))), int(uid))
-                for uid, a in users.items()
-            ),
-            reverse=True,
-        )
+        # indexed query on the denormalized `total` field — no full-collection scan
+        entries = await get_leaderboard(x)
         em = discord.Embed(
             title=f"Top {x} จตุรเทพแห่งความมั่งคั่ง",
             color=discord.Color.purple(),
         )
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        for index, (amt, id_) in enumerate(totals[:x], start=1):
+        for index, (uid, data) in enumerate(entries, start=1):
             medal = medals.get(index, f"**#{index}**")
-            uid_str = str(id_)
-            lv = xp_to_level(int(users.get(uid_str, {}).get("xp", 0)))
-            user = self.bot.get_user(id_)
+            amt = int(data.get("wallet", 0)) + int(data.get("deposited", data.get("bank", 0)))
+            lv = xp_to_level(int(data.get("xp", 0)))
+            user = self.bot.get_user(uid)
             if user is None:
                 try:
-                    user = await self.bot.fetch_user(id_)
+                    user = await self.bot.fetch_user(uid)
                 except discord.HTTPException:
-                    em.add_field(name=f"{medal} User {id_}", value=f"{amt:,} 🪙  •  ⭐ Lv.{lv}", inline=False)
+                    em.add_field(name=f"{medal} User {uid}", value=f"{amt:,} 🪙  •  ⭐ Lv.{lv}", inline=False)
                     continue
             em.add_field(name=f"{medal} {user.display_name}", value=f"{amt:,} 🪙  •  ⭐ Lv.{lv}", inline=False)
         await ctx.send(embed=em)
@@ -508,23 +504,49 @@ class EconomyCog(commands.Cog):
             return
         luck = max(0.0, min(luck, 200.0))
         await set_user_luck(member.id, luck)
-        jp_rate = min(8 / 512 * luck, 0.99) * 100
+        jp_rate = min(SLOT_JACKPOT_BASE * luck, 0.99) * 100
         await ctx.send(
             f"✅ **{member.display_name}** luck = **{luck}x**\n"
             f"Jackpot rate: **{jp_rate:.2f}%**/spin (ปกติ 1.56%)"
         )
 
+    @commands.command(aliases=["สถิติ"])
+    async def stats(self, ctx):
+        """$stats — สถิติ house win rate ต่อเกม (ใช้วัดความสมดุล)"""
+        data = await get_game_stats()
+        if not data:
+            await ctx.send("📭 ยังไม่มีสถิติเกมเลย เล่นก่อนสิ!")
+            return
+        _ICON = {"slot": "🎰", "flip": "🪙", "lottery": "🎟️", "bj": "🃏"}
+        em = discord.Embed(title="📊 สถิติ House Win Rate", color=discord.Color.blurple())
+        total_games = sum(int(g.get("games", 0)) for g in data.values())
+        for game, g in sorted(data.items()):
+            games = int(g.get("games", 0))
+            if games == 0:
+                continue
+            wins = int(g.get("house_wins", 0))
+            net = int(g.get("house_net", 0))
+            pct = wins / games * 100
+            icon = _ICON.get(game, "🎮")
+            em.add_field(
+                name=f"{icon} {game}",
+                value=f"**{games:,}** เกม • House ชนะ **{pct:.1f}%** • Net **{net:+,}** 🪙",
+                inline=False,
+            )
+        em.set_footer(text=f"รวม {total_games:,} เกม • jackpot base {SLOT_JACKPOT_BASE:.4%}")
+        await ctx.send(embed=em)
+
     @commands.command(aliases=["โชค"])
     async def luck(self, ctx, member: discord.Member = None):
         target = member or ctx.author
         lk = await get_user_luck(target.id)
-        jp_rate = min(8 / 512 * lk, 0.99) * 100
+        jp_rate = min(SLOT_JACKPOT_BASE * lk, 0.99) * 100
         color = discord.Color.green() if lk >= 1.0 else discord.Color.red()
         em = discord.Embed(color=color)
         em.set_author(name=target.display_name, icon_url=target.display_avatar.url)
         em.add_field(name="🍀 Luck Modifier", value=f"**{lk}x**", inline=True)
         em.add_field(name="🎰 Jackpot Rate", value=f"**{jp_rate:.2f}%** / spin", inline=True)
-        base_rate = 8 / 512 * 100
+        base_rate = SLOT_JACKPOT_BASE * 100
         diff = jp_rate - base_rate
         em.add_field(name="vs ปกติ", value=f"{'▲' if diff >= 0 else '▼'} {abs(diff):.2f}%", inline=True)
         await ctx.send(embed=em)

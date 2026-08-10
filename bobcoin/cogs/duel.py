@@ -16,7 +16,7 @@ from ..bank import (
 from ..gameplay import _BJView, _spawn
 from ..games import _bj_draw, _bj_str, _bj_total, _lucky_card
 from ..helpers import parse_positive_int
-from ..settings import SLOT_SYMBOLS
+from ..settings import SLOT_JACKPOT_BASE, SLOT_SYMBOLS
 
 _HOUSE_CUT = 0.05
 
@@ -36,7 +36,7 @@ async def _refund_tie(player_a: discord.Member, player_b: discord.Member, net_po
 
 async def _slot_spin(user_id: int) -> tuple[list[str], int]:
     luck = await get_effective_luck(user_id)
-    if random.random() < min(8 / 512 * luck, 0.99):
+    if random.random() < min(SLOT_JACKPOT_BASE * luck, 0.99):
         s = random.choice(SLOT_SYMBOLS)
         syms = [s, s, s]
     else:

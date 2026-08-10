@@ -64,6 +64,23 @@ def _parse(data: dict | None) -> tuple[int, int]:
     return w, d
 
 
+def _with_total(fields: dict, data: dict) -> dict:
+    """Attach the denormalized ``total`` (wallet + deposited) to a user write.
+
+    Kept on every money-mutating path so the leaderboard can use a single
+    indexed ``order_by("total", DESCENDING)`` query instead of scanning the
+    whole ``users`` collection (P2 #10 — Firestore cost).
+
+    ``fields`` may only carry a subset of the money fields (e.g. a loan write
+    touches wallet but not deposited) — any missing value falls back to the
+    current doc so ``total`` never goes stale.
+    """
+    w = int(fields.get("wallet", data.get("wallet", 0)))
+    d = int(fields.get("deposited", data.get("deposited", data.get("bank", 0))))
+    fields["total"] = w + d
+    return fields
+
+
 def _positive_amount(amount) -> int | None:
     try:
         amount = int(amount)
@@ -103,7 +120,7 @@ async def open_account(user, extra: dict | None = None) -> bool:
     data = {"wallet": 0, "deposited": 0}
     if extra:
         data.update(extra)
-    await ref.set(data)
+    await ref.set(_with_total(data, {}))
     return True
 
 
@@ -112,7 +129,7 @@ async def is_registered(user_id: int) -> bool:
 
 
 async def get_bank_data() -> dict:
-    """All user data (cached 60s). Only used for read-only views (leaderboard)."""
+    """All user data (cached 60s). Only used for read-only views."""
     cached = _cache_get("bank_data")
     if cached is not None:
         return cached
@@ -121,6 +138,22 @@ async def get_bank_data() -> dict:
         result[doc.id] = doc.to_dict()
     _cache_set("bank_data", result)
     return result
+
+
+async def get_leaderboard(limit: int = 10) -> list[tuple[int, dict]]:
+    """Top ``limit`` users by total wealth — single indexed query, no scan.
+
+    Uses the denormalized ``total`` field kept on every money write (P2 #10),
+    so this never streams the whole collection like ``get_bank_data`` does.
+    Returns [(uid, user_doc), ...] richest first.
+    """
+    col = (
+        _get_db()
+        .collection("users")
+        .order_by("total", direction=Query.DESCENDING)
+        .limit(limit)
+    )
+    return [(int(doc.id), doc.to_dict() or {}) async for doc in col.stream()]
 
 
 async def get_balance(user) -> list[int]:
@@ -140,11 +173,12 @@ async def update_bank(user, change=0) -> list[int] | None:
         doc = await ref.get(transaction=t)
         if not doc.exists:
             raise _Abort()
-        w, d = _parse(doc.to_dict())
+        ud = doc.to_dict()
+        w, d = _parse(ud)
         new_w = w + change
         if new_w < 0:
             raise _Abort()
-        t.set(ref, {"wallet": new_w, "deposited": d}, merge=True)
+        t.set(ref, _with_total({"wallet": new_w, "deposited": d}, ud), merge=True)
         return [new_w, d]
 
     return await _in_txn(_work)
@@ -223,11 +257,12 @@ async def user_deposit(user, amount: int) -> list[int] | None:
         h_doc = await house_ref.get(transaction=t)
         if not u_doc.exists:
             raise _Abort()
-        w, d  = _parse(u_doc.to_dict())
+        ud = u_doc.to_dict()
+        w, d  = _parse(ud)
         if w < amount:
             raise _Abort()
         hd = h_doc.to_dict() or {}
-        t.set(user_ref,  {"wallet": w - amount, "deposited": d + amount}, merge=True)
+        t.set(user_ref,  _with_total({"wallet": w - amount, "deposited": d + amount}, ud), merge=True)
         t.set(house_ref, {"balance": int(hd.get("balance", 0)) + amount, "total_in": int(hd.get("total_in", 0)) + amount}, merge=True)
         return [w - amount, d + amount]
 
@@ -248,14 +283,15 @@ async def user_withdraw(user, amount: int) -> list[int] | bool | None:
         h_doc = await house_ref.get(transaction=t)
         if not u_doc.exists:
             raise _Abort()
-        w, d  = _parse(u_doc.to_dict())
+        ud = u_doc.to_dict()
+        w, d  = _parse(ud)
         hd = h_doc.to_dict() or {}
         h_bal = int(hd.get("balance", 0))
         if d < amount:
             raise _Abort()
         if h_bal < amount:
             raise _Abort(False)   # house broke → caller gets False
-        t.set(user_ref,  {"wallet": w + amount, "deposited": d - amount}, merge=True)
+        t.set(user_ref,  _with_total({"wallet": w + amount, "deposited": d - amount}, ud), merge=True)
         t.set(house_ref, {"balance": h_bal - amount, "total_out": int(hd.get("total_out", 0)) + amount}, merge=True)
         return [w + amount, d - amount]
 
@@ -279,12 +315,14 @@ async def transfer_to_user(sender, recipient, amount: int) -> int | bool | None:
         s_doc = await sender_ref.get(transaction=t)
         if not s_doc.exists:
             raise _Abort()
-        s_w, s_d = _parse(s_doc.to_dict())
+        s_ud = s_doc.to_dict()
+        r_ud = r_doc.to_dict()
+        s_w, s_d = _parse(s_ud)
         if s_w < amount:
             raise _Abort()
-        r_w, r_d = _parse(r_doc.to_dict())
-        t.set(sender_ref,    {"wallet": s_w - amount, "deposited": s_d}, merge=True)
-        t.set(recipient_ref, {"wallet": r_w + amount, "deposited": r_d}, merge=True)
+        r_w, r_d = _parse(r_ud)
+        t.set(sender_ref,    _with_total({"wallet": s_w - amount, "deposited": s_d}, s_ud), merge=True)
+        t.set(recipient_ref, _with_total({"wallet": r_w + amount, "deposited": r_d}, r_ud), merge=True)
         return s_w - amount
 
     return await _in_txn(_work)
@@ -338,15 +376,17 @@ async def rob_transfer(robber, target, amount: int) -> bool:
         t_doc = await target_ref.get(transaction=t)
         if not t_doc.exists:
             raise _Abort()
-        t_w, t_d = _parse(t_doc.to_dict())
+        t_ud = t_doc.to_dict()
+        t_w, t_d = _parse(t_ud)
         if t_w < amount:
             raise _Abort()
         r_doc = await robber_ref.get(transaction=t)
         if not r_doc.exists:
             raise _Abort()
-        r_w, r_d = _parse(r_doc.to_dict())
-        t.set(target_ref, {"wallet": t_w - amount, "deposited": t_d}, merge=True)
-        t.set(robber_ref, {"wallet": r_w + amount, "deposited": r_d}, merge=True)
+        r_ud = r_doc.to_dict()
+        r_w, r_d = _parse(r_ud)
+        t.set(target_ref, _with_total({"wallet": t_w - amount, "deposited": t_d}, t_ud), merge=True)
+        t.set(robber_ref, _with_total({"wallet": r_w + amount, "deposited": r_d}, r_ud), merge=True)
         return True
 
     return await _in_txn(_work) or False
