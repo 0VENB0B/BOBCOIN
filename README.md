@@ -38,7 +38,9 @@ For development/testing, also install `requirements-dev.txt` (adds pytest).
 | `ANTHROPIC_API_KEY` | Optional | Enables the BOB chat AI / AI loan approval |
 | `GUCOIN_PREFIX` | Optional | Command prefix, defaults to `$` |
 | `GUCOIN_OWNER_ID` | Optional | Bot owner Discord ID |
-| `GUCOIN_ADMIN_ROLE_IDS` | Optional | Comma-separated admin role IDs |
+| `GUCOIN_ADMIN_ROLE_IDS` | Optional | Comma-separated admin role IDs (for `$BD`) |
+| `GUCOIN_DEV_MODE` | Optional | `1` to enable dev commands (`$setluck`, `$seed`, `$guardian_run`, `$bankhealth`) — still requires an admin identity; `0`/empty keeps them disabled |
+| `GUCOIN_BD_ROLE_IDS` | Optional | Comma-separated role IDs `$BD` may sell (empty = sells nothing) |
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 | `GUCOIN_AUDIT_CHANNEL_ID` | Optional | Casino audit channel — copies of deleted game results are forwarded here (`0` disables) |
 | `GUCOIN_SLOT_JACKPOT_BASE` | Optional | Slot jackpot rate per spin, default `0.015625` (≈1.56%); tune from `$stats` |
@@ -61,7 +63,9 @@ python -m pytest tests/ -v
 The suite fakes `google.cloud.firestore` entirely, so it runs offline with zero
 credentials. **460 tests** — the money layer is at ~100%, every cog including
 the interaction-heavy panel, and total `bobcoin/` coverage is **91%**
-(fail-under gate in CI). **476 tests** covering the P2 backlog too:
+(fail-under gate in CI). **489 tests** covering the P2 backlog and the P1
+hardening (AI-loan strict parsing + per-day rate limit + audit logging, `$BD`
+admin+whitelist, dev commands behind `GUCOIN_DEV_MODE`):
 leaderboard via the denormalized `total` index (`get_leaderboard`, no collection
 scan), house win-rate stats (`record_game_outcome` / `$stats`), and the casino
 audit-copy (`GUCOIN_AUDIT_CHANNEL_ID`):

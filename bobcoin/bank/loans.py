@@ -13,8 +13,10 @@ from .core import (
     _positive_amount,
     _ref,
     _with_total,
+    get_cooldown,
     get_history,
     log_history,
+    set_cooldown,
 )
 from .guardian import get_bank_health
 from .rewards import xp_to_level
@@ -206,6 +208,12 @@ async def ai_loan_limit(user_id: int, requested: int) -> int:
     Returns approved amount (0 = denied). Hard cap: 20% of house balance."""
     from ..ai import call_ai
 
+    # P1 #4: rate-limit AI loan requests to one per user per day, so prompt
+    # injection can't be farmed for repeated decisions.
+    if await get_cooldown(user_id, "ai_loan", 86_400) > 0:
+        return 0
+    await set_cooldown(user_id, "ai_loan")
+
     health = await get_bank_health()
     # ponytail: hard ceiling prevents any single loan from nuking the house
     hard_ceil = min(requested, int(health["balance"] * 0.20))
@@ -232,9 +240,39 @@ async def ai_loan_limit(user_id: int, requested: int) -> int:
     )
 
     raw = await call_ai(_AI_LOAN_SYSTEM, [{"role": "user", "content": prompt}], fallback="{}", max_tokens=120)
+    approved = _extract_approved(raw, hard_ceil)
+
+    # P1 #4: every AI request + decision is logged so abuse is auditable.
+    await log_history(user_id, {
+        "cmd": "ai_loan",
+        "requested": requested,
+        "approved": approved,
+        "raw": (raw or "")[:200],
+    })
+    return approved
+
+
+def _extract_approved(raw: str, hard_ceil: int) -> int:
+    """Parse the AI's JSON, returning a strictly-integer approved amount.
+
+    Rejects anything that isn't a plain decimal integer string/number — floats
+    ("1500.0"), exponents ("1e10") and booleans would otherwise sneak past
+    ``int()`` and could grant an arbitrarily large loan.
+    """
     try:
         start, end = raw.find("{"), raw.rfind("}") + 1
-        data = _json.loads(raw[start:end]) if start >= 0 else {}
-        return max(0, min(int(data.get("approved", 0)), hard_ceil))
-    except Exception:
+        if start < 0 or end <= start:
+            return 0
+        data = _json.loads(raw[start:end])
+    except (ValueError, TypeError):
         return 0
+    value = data.get("approved", 0)
+    # strictly a plain integer: bool is an int subclass and floats/exponent
+    # strings ("1500.5", "1e10") would otherwise widen the loan via int()
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return 0
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isdecimal() or len(value) > 18:
+            return 0
+    return max(0, min(int(value), hard_ceil))

@@ -329,3 +329,56 @@ def test_ai_decide_empty_actions_is_noop(monkeypatch):
         await cog._ai_decide(_health(status="warning"), [_lucky(1, 2.0)])
         assert nerf.calls == []
     run(scenario())
+
+
+# ── DEV commands (P1 #6: behind GUCOIN_DEV_MODE) ───────────────────────
+
+class _AdminBot:
+    async def is_owner(self, user):
+        return True
+
+
+class _Author:
+    def __init__(self, uid):
+        self.id = uid
+
+
+class _Ctx:
+    def __init__(self, author, bot):
+        self.author = author
+        self.bot = bot
+
+    async def send(self, *a, **kw):
+        pass
+
+
+def test_guardian_run_and_bankhealth_blocked_without_dev_mode(monkeypatch):
+    from conftest import invoke_command
+    from discord.ext import commands as _commands
+
+    async def scenario():
+        cog = _cog()
+        ctx = _Ctx(_Author(1), _AdminBot())
+        for command in ("guardian_run", "bankhealth"):
+            try:
+                await invoke_command(cog, command, ctx)
+                raise AssertionError(f"{command} must be blocked when DEV_MODE is off")
+            except _commands.CheckFailure:
+                pass
+    run(scenario())
+
+
+def test_guardian_run_works_with_dev_mode(monkeypatch):
+    from conftest import invoke_command
+
+    import bobcoin.settings as settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", True)
+
+    async def scenario():
+        cog = _cog()
+        monkeypatch.setattr(guardian_cog, "get_bank_health", _async_return(_health()))
+        monkeypatch.setattr(cog, "_run", _async_return(None))
+        ctx = _Ctx(_Author(1), _AdminBot())
+        await invoke_command(cog, "guardian_run", ctx)
+    run(scenario())

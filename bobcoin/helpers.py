@@ -1,3 +1,4 @@
+from . import settings as _settings
 from .settings import BOT_ADMIN_ROLE_IDS, BOT_OWNER_ID, MAX_BET
 
 
@@ -37,3 +38,15 @@ async def is_bot_admin(ctx) -> bool:
     if not BOT_ADMIN_ROLE_IDS:
         return False
     return any(getattr(role, "id", None) in BOT_ADMIN_ROLE_IDS for role in getattr(ctx.author, "roles", ()))
+
+
+async def is_dev_mode(ctx) -> bool:
+    """Dev-only commands: require GUCOIN_DEV_MODE=1 AND an admin identity.
+
+    The flag gates the command even for admins — a production instance that
+    forgets to set the env var keeps the dangerous toggles disabled.
+    Read dynamically so tests / runtime reloads can flip it without an import.
+    """
+    if not _settings.DEV_MODE:
+        return False
+    return await is_bot_admin(ctx)

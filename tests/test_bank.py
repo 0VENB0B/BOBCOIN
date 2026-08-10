@@ -20,6 +20,7 @@ from bobcoin.bank import (
     get_balance,
     get_bank_data,
     get_game_stats,
+    get_history,
     get_house_balance,
     get_house_data,
     get_house_debt,
@@ -379,7 +380,7 @@ def test_bank_data_cache():
     run(scenario())
 
 
-def test_ai_loan_limit_resolves_and_denies():
+def test_ai_loan_limit_resolves_and_denies(monkeypatch):
     """ai_loan_limit must resolve its lazy AI import and return 0 when AI denies."""
     async def scenario():
         import bobcoin.ai
@@ -387,11 +388,76 @@ def test_ai_loan_limit_resolves_and_denies():
 
         async def _fake_ai(*a, **kw):
             return "{}"  # AI denies
-        bobcoin.ai.call_ai = _fake_ai
+        monkeypatch.setattr(bobcoin.ai, "call_ai", _fake_ai)
 
         await open_account(_User(1))
         await house_receive(10_000_000)
         assert await ai_loan_limit(1, 500_000) == 0
+    run(scenario())
+
+
+def test_ai_loan_extract_approved_strict_int():
+    """P1 #4: only plain decimal integers pass — floats, exponents, bools, junk
+    and huge strings must never widen the approved loan."""
+    from bobcoin.bank.loans import _extract_approved
+
+    ceil = 100_000
+    assert _extract_approved('{"approved": 50000}', ceil) == 50_000
+    assert _extract_approved('{"approved": "50000"}', ceil) == 50_000
+    assert _extract_approved('{"approved": 200000}', ceil) == ceil        # capped
+    assert _extract_approved('{"approved": 0}', ceil) == 0
+    # injection attempts — must all be rejected
+    assert _extract_approved('{"approved": 1500.0}', ceil) == 0          # float
+    assert _extract_approved('{"approved": 1500.5}', ceil) == 0
+    assert _extract_approved('{"approved": "1e10"}', ceil) == 0         # exponent
+    assert _extract_approved('{"approved": true}', ceil) == 0            # bool
+    assert _extract_approved('{"approved": []}', ceil) == 0              # list
+    assert _extract_approved('{"approved": null}', ceil) == 0
+    assert _extract_approved('{"approved": "99999999999999999999"}', ceil) == 0  # >18 digits
+    assert _extract_approved('not json at all', ceil) == 0
+    assert _extract_approved('', ceil) == 0
+
+
+def test_ai_loan_logs_request_and_decision(monkeypatch):
+    """P1 #4: every AI request is logged to user history for auditability."""
+    async def scenario():
+        import bobcoin.ai
+        from bobcoin.bank import ai_loan_limit
+
+        async def _fake_ai(*a, **kw):
+            return '{"approved": 70000}'
+        monkeypatch.setattr(bobcoin.ai, "call_ai", _fake_ai)
+
+        await open_account(_User(1))
+        await house_receive(10_000_000)
+        assert await ai_loan_limit(1, 500_000) == 70_000
+        entries = await get_history(1)
+        assert entries and entries[0]["cmd"] == "ai_loan"
+        assert entries[0]["requested"] == 500_000
+        assert entries[0]["approved"] == 70_000
+    run(scenario())
+
+
+def test_ai_loan_rate_limited_to_once_per_day(monkeypatch):
+    """P1 #4: only one AI loan decision per user per day."""
+    async def scenario():
+        import bobcoin.ai
+        from bobcoin.bank import ai_loan_limit
+
+        calls = []
+
+        async def _fake_ai(*a, **kw):
+            calls.append(a)
+            return '{"approved": 70000}'
+        monkeypatch.setattr(bobcoin.ai, "call_ai", _fake_ai)
+
+        await open_account(_User(1))
+        await house_receive(10_000_000)
+        assert await ai_loan_limit(1, 500_000) == 70_000
+        assert len(calls) == 1
+        # second attempt within 24h → denied without calling the AI again
+        assert await ai_loan_limit(1, 500_000) == 0
+        assert len(calls) == 1
     run(scenario())
 
 

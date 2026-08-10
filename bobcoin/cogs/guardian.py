@@ -16,7 +16,7 @@ from ..bank import (
     guardian_restore_user,
     house_repay_debt,
 )
-from ..helpers import is_bot_admin
+from ..helpers import is_dev_mode
 
 logger = logging.getLogger("bobcoin.guardian")
 
@@ -187,7 +187,7 @@ class GuardianCog(commands.Cog):
     # ── DEV command to check guardian status ─────────────────────────────────
 
     @commands.command(aliases=["guardian", "คลังสุขภาพ"])
-    @commands.check(is_bot_admin)
+    @commands.check(is_dev_mode)
     async def bankhealth(self, ctx):
         health = await get_bank_health()
         lucky = await get_lucky_users()
@@ -221,9 +221,9 @@ class GuardianCog(commands.Cog):
         await ctx.send(embed=em)
 
     @commands.command()
-    @commands.check(is_bot_admin)
+    @commands.check(is_dev_mode)
     async def guardian_run(self, ctx):
-        """DEV: force run guardian check now."""
+        """DEV (GUCOIN_DEV_MODE): force run guardian check now."""
         await ctx.send("🛡️ Running guardian check...")
         await self._run()
         health = await get_bank_health()

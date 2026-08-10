@@ -20,6 +20,16 @@ BOT_ADMIN_ROLE_IDS = _parse_id_set(os.getenv("GUCOIN_ADMIN_ROLE_IDS", ""))
 MAX_BET = 1_000_000_000
 MAX_PURGE_MESSAGES = 100
 
+# Dev commands ($setluck, $guardian_run, ...) require this flag ON *and* an
+# admin identity — keeps dangerous toggles out of production.
+def _as_bool(value: str) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+DEV_MODE = _as_bool(os.getenv("GUCOIN_DEV_MODE", ""))
+
+# Whitelist of role IDs that $BD may sell (empty = $BD sells nothing).
+BD_ROLE_IDS = _parse_id_set(os.getenv("GUCOIN_BD_ROLE_IDS", ""))
+
 # Casino audit log — copy deleted game results to this channel (0 = disabled)
 def _parse_optional_int(value: str) -> int:
     try:

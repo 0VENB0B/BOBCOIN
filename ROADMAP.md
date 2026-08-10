@@ -54,15 +54,18 @@
 
 ## 🟠 P1 — ควรทำ
 
-4. **AI เงินกู้ (`ai_loan_limit`)** — prompt มีข้อมูล user อาจโดน injection ขอวงเงินสูง
-   - มี hard cap 20% ของคลังคุมอยู่แล้ว แต่ควรเพิ่ม: ตรวจ `approved` เป็นตัวเลขล้วน
-     (ไม่ใช่แค่ `int()`), log ทุกคำขอ AI + decision, จำกัดต่อ user (เช่น 1 ครั้ง/วัน)
-   - ~~**บั๊กที่เทสต์เจอ (2026-08)**~~ ✅ แก้แล้ว — persist `ai_loan_ceiling` ลง doc
-     user, `get_loan_info` ใช้ `max(static, AI)` เป็นวงเงิน, และ reset เมื่อชำระหนี้หมด
-5. **`$shop` / `$BD`** — `$BD` กันแค่ `has_any_role("Profile")` → เปลี่ยนเป็นเช็ค
-   permission จริง (เช่น admin role) หรือจำกัด role ที่ซื้อได้ (whitelist)
-6. **Dev command ที่เหลือ** — `$setluck`, `$guardian_run` มี `is_bot_admin` กันอยู่
-   แต่ควรย้ายออกไปอยู่หลัง feature flag (เช่น env `GUCOIN_DEV_MODE`)
+4. ~~**AI เงินกู้ (`ai_loan_limit`)**~~ ✅ ทำแล้ว — เพิ่ม `_extract_approved()` ตรวจ
+   `approved` เป็น int ล้วน (reject float/exponent/bool/string ยาว — `"1e10"`,
+   `1500.5`, `true` เคยหลุดผ่าน `int()` ได้), **log ทุกคำขอ + decision** ลง history
+   (`ai_loan` entry: requested/approved/raw), และ **rate limit 1 ครั้ง/วัน/คน**
+   (cooldown `ai_loan` ใน Firestore) — กัน injection ขอวงเงินซ้ำๆ
+5. ~~**`$shop` / `$BD`**~~ ✅ ทำแล้ว — `$BD` เปลี่ยนจาก `has_any_role("Profile")`
+   เป็น **admin-only** (`is_bot_admin`) + **whitelist role ที่ขายได้** ผ่าน env
+   `GUCOIN_BD_ROLE_IDS` (ว่าง = ขายไม่ได้เลย; เช็คใน `_buy_role` ก่อนหักเงิน)
+6. ~~**Dev command ที่เหลือ**~~ ✅ ทำแล้ว — `$setluck`, `$seed`, `$guardian_run`,
+   `$bankhealth` ย้ายไปอยู่หลัง **feature flag `GUCOIN_DEV_MODE`** (ต้อง flag ON
+   *และ* เป็น admin — แม้เป็น admin ถ้า flag ปิดก็ใช้ไม่ได้) ผ่าน `is_dev_mode()`
+   ใน helpers
 7. ~~**ขยายเทสต์**~~ ✅ ทำแล้ว — `_parse_intent` ครบ, game runners
    (`gameplay.py` 78%), duel 73%, **panel 38→91%** (embed/guard/modals ทุกตัว/
    ปุ่ม view ครบ/setup/on_message/auto-delete), **events 41→99%** (on_message/

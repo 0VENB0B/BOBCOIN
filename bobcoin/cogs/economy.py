@@ -52,8 +52,8 @@ from ..gameplay import (
     _spawn,
 )
 from ..games import _streak_effects
-from ..helpers import is_bot_admin, parse_amount_or_reply, parse_positive_int
-from ..settings import SLOT_JACKPOT_BASE
+from ..helpers import is_bot_admin, is_dev_mode, parse_amount_or_reply, parse_positive_int
+from ..settings import BD_ROLE_IDS, SLOT_JACKPOT_BASE
 
 logger = logging.getLogger("bobcoin.economy")
 
@@ -222,15 +222,24 @@ class EconomyCog(commands.Cog):
 
     @commands.command()
     @commands.has_permissions(manage_messages=True)
-    @commands.has_any_role("Profile")
+    @commands.check(is_bot_admin)
     async def BD(self, ctx, member: discord.Member = None, *, role: discord.Role = None):
-        await self._buy_role(ctx, member, role, price=100000)
+        """Sell a whitelisted role (GUCOIN_BD_ROLE_IDS). Admin only."""
+        await self._buy_role(ctx, member, role, price=100000, whitelist=BD_ROLE_IDS)
 
-    async def _buy_role(self, ctx, member, role, price: int):
+    async def _buy_role(self, ctx, member, role, price: int, whitelist=None):
+        """Shared shop/BD backend.
+
+        ``whitelist`` of role IDs restricts which roles may be sold: ``None``
+        (shop) means any role, while an empty set (BD with no whitelist
+        configured) sells nothing — fail-closed (P1 #5).
+        """
         if member is None:
             await ctx.send("ใส่ชื่อที่จะซื้อของให้"); return
         if role is None:
             await ctx.send("ใส่สิ่งของที่ต้องการ"); return
+        if whitelist is not None and getattr(role, "id", None) not in whitelist:
+            await ctx.send("role นี้ไม่ได้อยู่ในรายการที่ขายได้"); return
         me = ctx.guild.me
         if me and role >= me.top_role:
             await ctx.send("บอทไม่มีสิทธิ์ให้ role นี้"); return
@@ -496,9 +505,9 @@ class EconomyCog(commands.Cog):
         await ctx.send(embed=em)
 
     @commands.command()
-    @commands.check(is_bot_admin)
+    @commands.check(is_dev_mode)
     async def setluck(self, ctx, member: discord.Member = None, luck: float = 1.0):
-        """DEV: set per-user slot luck multiplier. 1.0=normal, 0=never win, 64=always jackpot."""
+        """DEV (GUCOIN_DEV_MODE): set per-user slot luck multiplier."""
         if member is None:
             await ctx.send("ระบุ user ด้วย `$setluck @user <multiplier>`")
             return
@@ -620,7 +629,7 @@ class EconomyCog(commands.Cog):
         await ctx.send(embed=em)
 
     @commands.command()
-    @commands.check(is_bot_admin)
+    @commands.check(is_dev_mode)
     async def seed(self, ctx, amount: int = 0):
         if amount <= 0:
             await ctx.send("ใส่จำนวนเงินที่จะ seed เข้าคลังด้วย")

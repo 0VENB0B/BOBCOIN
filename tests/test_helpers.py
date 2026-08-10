@@ -192,6 +192,64 @@ def test_is_bot_admin_no_roles_no_match():
         helpers.BOT_ADMIN_ROLE_IDS = old_roles
 
 
+# ── is_dev_mode (P1 #6) ────────────────────────────────────────────────
+
+def test_is_dev_mode_requires_flag_and_admin(monkeypatch):
+    import bobcoin.settings as settings
+    old_flag = settings.DEV_MODE
+    old_owner = helpers.BOT_OWNER_ID
+    try:
+        settings.DEV_MODE = False
+        helpers.BOT_OWNER_ID = 123
+        # flag off → even the owner is blocked
+        assert run(helpers.is_dev_mode(_ctx(_Author(123), _Bot()))) is False
+
+        settings.DEV_MODE = True
+        # flag on + owner id → allowed
+        assert run(helpers.is_dev_mode(_ctx(_Author(123), _Bot()))) is True
+        # flag on + discord owner → allowed
+        assert run(helpers.is_dev_mode(_ctx(_Author(1), _Bot(is_owner_result=True)))) is True
+        # flag on but not admin → blocked
+        assert run(helpers.is_dev_mode(_ctx(_Author(1), _Bot()))) is False
+    finally:
+        settings.DEV_MODE = old_flag
+        helpers.BOT_OWNER_ID = old_owner
+
+
+def test_is_dev_mode_respects_admin_roles(monkeypatch):
+    import bobcoin.settings as settings
+    old_flag = settings.DEV_MODE
+    old_owner = helpers.BOT_OWNER_ID
+    old_roles = helpers.BOT_ADMIN_ROLE_IDS
+    try:
+        settings.DEV_MODE = True
+        helpers.BOT_OWNER_ID = 999
+        helpers.BOT_ADMIN_ROLE_IDS = frozenset({20})
+        assert run(helpers.is_dev_mode(_ctx(_Author(1, role_ids=[20]), _Bot()))) is True
+        assert run(helpers.is_dev_mode(_ctx(_Author(1, role_ids=[30]), _Bot()))) is False
+    finally:
+        settings.DEV_MODE = old_flag
+        helpers.BOT_OWNER_ID = old_owner
+        helpers.BOT_ADMIN_ROLE_IDS = old_roles
+
+
+def test_is_dev_mode_reads_flag_dynamically(monkeypatch):
+    """P1 #6: is_dev_mode must observe settings.DEV_MODE at call time."""
+    import bobcoin.settings as settings
+    old_flag = settings.DEV_MODE
+    old_owner = helpers.BOT_OWNER_ID
+    try:
+        settings.DEV_MODE = False
+        helpers.BOT_OWNER_ID = 123
+        assert run(helpers.is_dev_mode(_ctx(_Author(123), _Bot()))) is False
+        # flip mid-test without re-import — must take effect immediately
+        settings.DEV_MODE = True
+        assert run(helpers.is_dev_mode(_ctx(_Author(123), _Bot()))) is True
+    finally:
+        settings.DEV_MODE = old_flag
+        helpers.BOT_OWNER_ID = old_owner
+
+
 # ── settings parsing (P2 #12 / #11 / #8) ───────────────────────────────
 
 def test_parse_optional_int_bad_value_returns_zero(monkeypatch):
@@ -205,10 +263,7 @@ def test_parse_optional_int_bad_value_returns_zero(monkeypatch):
 def test_settings_defaults_and_env_override(monkeypatch):
     import bobcoin.settings as settings
     assert settings.AUDIT_CHANNEL_ID == 0            # default disabled
-    assert settings.SLOT_JACKPOT_BASE == 8 / 512     # default 1.56%
-
-
-def test_env_vars_drive_settings(monkeypatch):
+    assert settings.SLOT_JACKPOT_BASE == 8 / 512     # default 1.56%def test_env_vars_drive_settings(monkeypatch):
     import importlib
 
     import bobcoin.settings as settings
@@ -235,3 +290,25 @@ def test_env_vars_ignore_garbage(monkeypatch):
     finally:
         monkeypatch.delenv("GUCOIN_AUDIT_CHANNEL_ID", raising=False)
         importlib.reload(settings)
+
+
+def test_dev_mode_and_bd_role_env_parsing(monkeypatch):
+    import importlib
+
+    import bobcoin.settings as settings
+    monkeypatch.setenv("GUCOIN_DEV_MODE", "1")
+    monkeypatch.setenv("GUCOIN_BD_ROLE_IDS", "10,20")
+    importlib.reload(settings)
+    try:
+        assert settings.DEV_MODE is True
+        assert frozenset({10, 20}) == settings.BD_ROLE_IDS
+    finally:
+        monkeypatch.delenv("GUCOIN_DEV_MODE", raising=False)
+        monkeypatch.delenv("GUCOIN_BD_ROLE_IDS", raising=False)
+        importlib.reload(settings)
+
+
+def test_dev_mode_false_by_default():
+    import bobcoin.settings as settings
+    assert settings.DEV_MODE is False
+    assert frozenset() == settings.BD_ROLE_IDS

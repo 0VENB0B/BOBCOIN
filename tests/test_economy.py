@@ -684,7 +684,7 @@ def test_luck_command_default_and_modified():
     run(scenario())
 
 
-# ── admin commands: setluck / seed ─────────────────────────────────────
+# ── admin commands: setluck / seed (behind GUCOIN_DEV_MODE) ────────────
 
 class _AdminBot:
     async def is_owner(self, user):
@@ -695,7 +695,16 @@ def _admin_cog():
     return _cog(_AdminBot())
 
 
-def test_setluck_requires_member_and_sets_luck():
+import bobcoin.settings as _settings  # noqa: E402
+
+
+def _enable_dev_mode(monkeypatch):
+    """Flip GUCOIN_DEV_MODE on for a test (helpers reads it dynamically)."""
+    monkeypatch.setattr(_settings, "DEV_MODE", True)
+
+
+def test_setluck_requires_member_and_sets_luck(monkeypatch):
+    _enable_dev_mode(monkeypatch)
     async def scenario():
         from bobcoin.bank import get_user_luck
         await _setup_user(1, 0)
@@ -711,7 +720,8 @@ def test_setluck_requires_member_and_sets_luck():
     run(scenario())
 
 
-def test_setluck_clamps_extremes():
+def test_setluck_clamps_extremes(monkeypatch):
+    _enable_dev_mode(monkeypatch)
     async def scenario():
         from bobcoin.bank import get_user_luck
         await _setup_user(1, 0)
@@ -722,7 +732,8 @@ def test_setluck_clamps_extremes():
     run(scenario())
 
 
-def test_seed_requires_positive_amount_and_seeds_house():
+def test_seed_requires_positive_amount_and_seeds_house(monkeypatch):
+    _enable_dev_mode(monkeypatch)
     async def scenario():
         await house_receive(100_000)
         ctx = _Ctx(_Member(1))
@@ -738,7 +749,24 @@ def test_seed_requires_positive_amount_and_seeds_house():
     run(scenario())
 
 
-def test_setluck_and_seed_reject_non_admin():
+def test_dev_commands_blocked_when_flag_off_even_for_admin(monkeypatch):
+    from discord.ext import commands as _commands
+
+    async def scenario():
+        await _setup_user(1, 0)
+        for command, args in [("setluck", (_Member(1), 2.0)), ("seed", (5000,))]:
+            ctx = _Ctx(_Member(1))
+            ctx.bot = _AdminBot()
+            try:
+                await invoke_command(_admin_cog(), command, ctx, *args)
+                raise AssertionError(f"{command} must be blocked when DEV_MODE is off")
+            except _commands.CheckFailure:
+                pass
+    run(scenario())
+
+
+def test_dev_commands_reject_non_admin_even_when_flag_on(monkeypatch):
+    _enable_dev_mode(monkeypatch)
     from discord.ext import commands as _commands
 
     async def scenario():
@@ -747,7 +775,7 @@ def test_setluck_and_seed_reject_non_admin():
             ctx = _Ctx(_Member(1))
             try:
                 await invoke_command(_cog(_Bot()), command, ctx, *args)
-                raise AssertionError(f"{command} must raise CheckFailure for non-admin")
+                raise AssertionError(f"{command} must require an admin even in dev mode")
             except _commands.CheckFailure:
                 pass
     run(scenario())
@@ -1124,4 +1152,48 @@ def test_buy_role_refunds_when_role_assignment_fails():
         await cog._buy_role(ctx, member, _ShopRole(1), 1000)
         assert (await get_balance(_Member(1))) == [10_000, 0]    # refunded
         assert "คืนเงินแล้ว" in _texts(ctx)
+    run(scenario())
+
+
+def test_buy_role_whitelist_blocks_unlisted_role():
+    async def scenario():
+        await _setup_user(1, 10_000)
+        cog = _cog(_Bot())
+        member = _ShopMember(2)
+        whitelist = frozenset({7, 8})                # role id 1 not in it
+        ctx = _ShopCtx(_Member(1), _ShopGuild())
+        await cog._buy_role(ctx, member, _ShopRole(1), 1000, whitelist=whitelist)
+        assert "ไม่ได้อยู่ในรายการ" in _texts(ctx)
+        assert member.added == []
+        assert (await get_balance(_Member(1))) == [10_000, 0]    # not charged
+    run(scenario())
+
+
+def test_buy_role_whitelist_allows_listed_role():
+    async def scenario():
+        await _setup_user(1, 10_000)
+        cog = _cog(_Bot())
+        role = _ShopRole(1)
+        role.id = 7                                   # whitelisted
+        member = _ShopMember(2)
+        ctx = _ShopCtx(_Member(1), _ShopGuild())
+        await cog._buy_role(ctx, member, role, 1000, whitelist=frozenset({7}))
+        assert member.added == [role]
+        assert "was given" in _texts(ctx)
+    run(scenario())
+
+
+def test_buy_role_empty_whitelist_sells_nothing_fail_closed():
+    """P1 #5: BD with no whitelist configured must sell nothing, not everything."""
+    async def scenario():
+        await _setup_user(1, 10_000)
+        cog = _cog(_Bot())
+        role = _ShopRole(1)
+        role.id = 7                                   # even a 'listed' id is blocked
+        member = _ShopMember(2)
+        ctx = _ShopCtx(_Member(1), _ShopGuild())
+        await cog._buy_role(ctx, member, role, 1000, whitelist=frozenset())
+        assert "ไม่ได้อยู่ในรายการ" in _texts(ctx)
+        assert member.added == []
+        assert (await get_balance(_Member(1))) == [10_000, 0]    # not charged
     run(scenario())
