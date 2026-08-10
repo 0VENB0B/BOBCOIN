@@ -374,3 +374,58 @@ def test_on_ready_sets_game_presence():
         assert isinstance(activity, discord.Game)
         assert activity.name == f"{COMMAND_PREFIX}command"
     run(scenario())
+
+
+# ── on_command / on_error metrics (P3 Ops) ────────────────────────────
+
+def test_on_command_bumps_metrics():
+    import bobcoin.metrics as metrics
+    metrics.reset()
+
+    async def scenario():
+        ctx = _Ctx()
+        ctx.command = types.SimpleNamespace(name="slot")
+        await _cog().on_command(ctx)
+        snap = metrics.snapshot()["counts"]
+        assert snap["commands"] == 1
+        assert snap["command.slot"] == 1
+    run(scenario())
+
+
+def test_on_command_handles_missing_command():
+    import bobcoin.metrics as metrics
+    metrics.reset()
+
+    async def scenario():
+        ctx = _Ctx()
+        ctx.command = None
+        await _cog().on_command(ctx)
+        snap = metrics.snapshot()["counts"]
+        assert snap["commands"] == 1
+        assert not any(k.startswith("command.") for k in snap)
+    run(scenario())
+
+
+def test_on_command_error_bumps_command_errors():
+    import bobcoin.metrics as metrics
+    metrics.reset()
+
+    async def scenario():
+        ctx = _Ctx()
+        ctx.command = None
+        await _cog().on_command_error(ctx, commands.CommandNotFound("x"))
+        snap = metrics.snapshot()["counts"]
+        assert snap["command_errors"] == 1
+    run(scenario())
+
+
+def test_on_error_listener_bumps_event_errors():
+    """Unhandled gateway exceptions must be surfaced + counted (P3 Ops)."""
+    import bobcoin.metrics as metrics
+    metrics.reset()
+
+    async def scenario():
+        await _cog().on_error("on_message", object())
+        snap = metrics.snapshot()["counts"]
+        assert snap["event_errors"] == 1
+    run(scenario())

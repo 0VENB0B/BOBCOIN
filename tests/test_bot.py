@@ -54,3 +54,49 @@ def test_each_cog_extension_has_a_setup_function():
     for ext in bot_module.COGS:
         module = __import__(ext, fromlist=["setup"])
         assert hasattr(module, "setup"), ext
+
+
+def test_close_drains_background_tasks(monkeypatch):
+    """P3 Ops: close() must drain in-flight background tasks before closing."""
+    import bobcoin.gameplay as gp
+    drained = []
+
+    async def _fake_drain(timeout=5.0):
+        drained.append(timeout)
+        return 0
+
+    monkeypatch.setattr(gp, "drain_background_tasks", _fake_drain)
+
+    async def scenario():
+        bot = create_bot()
+        await bot.close()
+        assert drained == [5.0]
+    asyncio.run(scenario())
+
+
+def test_close_calls_cog_unload_on_every_cog(monkeypatch):
+    """P3 Ops: close() must cancel task loops via each cog's cog_unload."""
+    import bobcoin.gameplay as gp
+    monkeypatch.setattr(gp, "drain_background_tasks", _fake_drain)
+
+    unloaded = []
+
+    class _FakeCog:
+        def __init__(self, name):
+            self.name = name
+
+        def cog_unload(self):
+            unloaded.append(self.name)
+
+    async def scenario():
+        bot = create_bot()
+        # discord.py stores cogs in the name-mangled ``__cogs`` dict
+        # (mangled against _BotBase, where commands.Bot declares it)
+        bot._BotBase__cogs = {"a": _FakeCog("a"), "b": _FakeCog("b")}
+        await bot.close()
+        assert unloaded == ["a", "b"]
+    asyncio.run(scenario())
+
+
+async def _fake_drain(timeout=5.0):
+    return 0

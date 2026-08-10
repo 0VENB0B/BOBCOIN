@@ -3,6 +3,8 @@ import os
 
 import aiohttp
 
+from . import metrics
+
 logger = logging.getLogger("bobcoin.ai")
 
 BOB_SYSTEM = (
@@ -25,7 +27,9 @@ def _get_session() -> aiohttp.ClientSession:
 async def call_ai(system: str, messages: list, fallback: str = "", max_tokens: int = 150) -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
+        metrics.incr("ai_skipped_no_key")
         return fallback
+    metrics.incr("ai_calls")
     try:
         async with _get_session().post(
             "https://gateway.9arm.co/v1/chat/completions",
@@ -38,7 +42,10 @@ async def call_ai(system: str, messages: list, fallback: str = "", max_tokens: i
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             data = await resp.json(content_type=None)
-            return data["choices"][0]["message"]["content"].strip()
+            result = data["choices"][0]["message"]["content"].strip()
+            metrics.incr("ai_successes")
+            return result
     except Exception:
         logger.exception("AI call failed")
+        metrics.incr("ai_failures")
         return fallback

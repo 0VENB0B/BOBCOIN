@@ -7,6 +7,7 @@ import random
 
 import discord
 
+from . import metrics
 from .ai import BOB_SYSTEM, call_ai
 from .bank import (
     ACHIEVEMENTS,
@@ -42,6 +43,7 @@ def _spawn(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_on_task_done)
+    metrics.incr("background_tasks_spawned")
     return task
 
 
@@ -59,6 +61,23 @@ def _on_task_done(task: asyncio.Task) -> None:
     exc = task.exception()
     if exc is not None:
         logger.error("Background task failed", exc_info=exc)
+        metrics.incr("background_task_failures")
+
+
+async def drain_background_tasks(timeout: float = 5.0) -> int:
+    """Wait up to ``timeout`` seconds for in-flight background tasks to finish.
+
+    Used at shutdown (P3 Ops — graceful shutdown) so fire-and-forget writes
+    (history, XP, achievements) aren't cut off mid-flight. Returns the number
+    of tasks still pending after the timeout (they are cancelled).
+    """
+    pending = list(_background_tasks)
+    if not pending:
+        return 0
+    _done, still_pending = await asyncio.wait(pending, timeout=timeout)
+    for task in still_pending:
+        task.cancel()
+    return len(still_pending)
 
 
 

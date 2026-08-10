@@ -98,6 +98,21 @@
     `GUCOIN_ADMIN_ROLE_IDS`, `LOG_LEVEL`, + ใหม่ `GUCOIN_AUDIT_CHANNEL_ID`,
     `GUCOIN_SLOT_JACKPOT_BASE`) และ README มีตารางอธิบายครบ
 
+## 🔵 P3 — Ops / dev (graceful shutdown, metrics, logging)
+
+13. ~~**Graceful shutdown ของ background tasks**~~ ✅ ทำแล้ว — `drain_background_tasks()`
+    ใน `gameplay.py` รอ fire-and-forget tasks (history/XP/achievement) จบภายใน
+    timeout ก่อนปิด (เหลือค้าง → cancel + log) และ `GUCoinBot.close()`
+    override ให้เรียก `cog_unload` ของทุก cog (หยุด task loops) ก่อน drain แล้วค่อย
+    ปิด connection — ป้องกันข้อมูลหายกลางคันตอน restart/deploy
+14. ~~**Metrics ใน process**~~ ✅ ทำแล้ว — `bobcoin/metrics.py` counters/gauges/
+    uptime เบาๆ (ไม่มี dependency) + `$metrics` (dev mode) ดู: commands ต่อชื่อ,
+    AI calls/success/failures, background task failures, event errors, guild
+    count, uptime — ใช้เฝ้าสุขภาพบอทโดยไม่ต้องพึ่ง external service
+15. ~~**Logging ดีขึ้น**~~ ✅ ทำแล้ว — `main.py` format มาตรฐาน (timestamp +
+    level + logger name), log เวลาโหลด cogs ใน `setup_hook`, log ready พร้อม
+    จำนวน guild, `on_error` listener จับ event exception ที่เคยเงียบหาย
+
 ## 📌 หลักการคงไว้
 
 - เงินทุกเส้นทางต้องผ่าน atomic transaction ใน `bank.py` — ห้าม bypass

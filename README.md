@@ -44,6 +44,7 @@ For development/testing, also install `requirements-dev.txt` (adds pytest).
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 | `GUCOIN_AUDIT_CHANNEL_ID` | Optional | Casino audit channel — copies of deleted game results are forwarded here (`0` disables) |
 | `GUCOIN_SLOT_JACKPOT_BASE` | Optional | Slot jackpot rate per spin, default `0.015625` (≈1.56%); tune from `$stats` |
+| `GUCOIN_DEV_MODE` | Optional | `1` enables dev/ops commands — `$metrics` (in-process bot health: uptime, commands, AI calls, background-task failures) joins `$setluck`/`$seed`/`$guardian_run`/`$bankhealth` |
 
 > A ready-to-fill template lives in `.env.example`.
 
@@ -95,7 +96,8 @@ audit-copy (`GUCOIN_AUDIT_CHANNEL_ID`):
   branches, nerf floors, AI decision clamp (−30%/cycle, never boosts)
 - `test_events_cog.py` — `on_message` intent routing, `_handle_game_intent`
   command rewrites, `on_command_error` mapping, `on_ready`; `test_bot.py` —
-  factory smoke test + cog wiring
+  factory smoke test + cog wiring + graceful-shutdown `close()` (drains
+  background tasks, calls `cog_unload` on every cog)
 - `test_intents.py` — the `@BOB` chat→game parser: all-in/half, 5-digit
   lottery tickets, flip sides, amounts with commas
 - `test_games.py` / `test_helpers.py` — property/statistical checks on the
@@ -131,5 +133,7 @@ bugs), then `pytest` + coverage with a `--fail-under=70` gate on `bobcoin/*`.
 - Bank data is stored in **Firestore** (collection `users`, `system/bank`,
   `system/jackpot`, `system/debt`). All money moves go through atomic
   transactions in `bank.py`.
+- Shutdown is graceful: `GUCoinBot.close()` cancels task loops and drains
+  in-flight background tasks (history/XP writes) before closing.
 - See `ROADMAP.md` for the prioritized backlog (cooldown persistence, rob
   atomicity, AI-loan hardening, etc.).

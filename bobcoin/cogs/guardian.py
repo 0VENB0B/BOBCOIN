@@ -4,6 +4,7 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from .. import metrics
 from ..ai import call_ai
 from ..bank import (
     _house_ref,
@@ -228,6 +229,28 @@ class GuardianCog(commands.Cog):
         await self._run()
         health = await get_bank_health()
         await ctx.send(f"✅ Done. Status: **{health['status']}** | Balance: **{health['balance']:,}** 🪙")
+
+    @commands.command()
+    @commands.check(is_dev_mode)
+    async def metrics(self, ctx):
+        """DEV (GUCOIN_DEV_MODE): in-process ops metrics (P3)."""
+        snap = metrics.snapshot()
+        up = snap["uptime_s"]
+        days, rem = divmod(up, 86_400)
+        hours, rem = divmod(rem, 3_600)
+        minutes = rem // 60
+        em = discord.Embed(title="📈 Ops Metrics", color=discord.Color.blurple())
+        em.add_field(name="⏱️ Uptime", value=f"**{days}d {hours}h {minutes}m**", inline=False)
+        if snap["gauges"]:
+            gauges = "  •  ".join(f"`{k}` **{v:g}**" for k, v in snap["gauges"].items())
+            em.add_field(name="📊 Gauges", value=gauges, inline=False)
+        if snap["counts"]:
+            lines = "\n".join(f"`{k}`: **{v:,}**" for k, v in snap["counts"].items())
+            em.add_field(name="🔢 Counters", value=lines, inline=False)
+        else:
+            em.add_field(name="🔢 Counters", value="ยังไม่มีข้อมูล", inline=False)
+        em.set_footer(text=f"total commands: {snap['counts'].get('commands', 0):,}")
+        await ctx.send(embed=em)
 
 
 async def setup(bot):

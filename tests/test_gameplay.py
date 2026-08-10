@@ -235,6 +235,43 @@ def test_slot_blocked_when_no_funds(speed):
     asyncio.run(scenario())
 
 
+# ── Graceful shutdown drain (P3 Ops) ───────────────────────────────────
+
+def test_drain_background_tasks_waits_for_completion():
+    async def scenario():
+        flag = []
+
+        async def _slow():
+            await asyncio.sleep(0.01)
+            flag.append("done")
+
+        task = gp._spawn(_slow())
+        still = await gp.drain_background_tasks(timeout=1.0)
+        assert still == 0
+        assert flag == ["done"]
+        assert task not in gp._background_tasks      # callback discarded it
+    asyncio.run(scenario())
+
+
+def test_drain_background_tasks_cancels_stuck_tasks():
+    async def scenario():
+        async def _stuck():
+            await asyncio.sleep(60)
+
+        task = gp._spawn(_stuck())
+        still = await gp.drain_background_tasks(timeout=0.05)
+        assert still == 1
+        await asyncio.sleep(0)          # let the cancel propagate to the task
+        assert task.cancelled()
+    asyncio.run(scenario())
+
+
+def test_drain_background_tasks_empty_is_noop():
+    async def scenario():
+        assert await gp.drain_background_tasks(timeout=0.01) == 0
+    asyncio.run(scenario())
+
+
 # ── Game stats recording (P2 #8) ───────────────────────────────────────
 
 def test_blocked_games_record_no_stats(speed):

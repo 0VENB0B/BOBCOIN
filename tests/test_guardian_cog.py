@@ -382,3 +382,53 @@ def test_guardian_run_works_with_dev_mode(monkeypatch):
         ctx = _Ctx(_Author(1), _AdminBot())
         await invoke_command(cog, "guardian_run", ctx)
     run(scenario())
+
+
+def test_metrics_command_blocked_without_dev_mode(monkeypatch):
+    from conftest import invoke_command
+    from discord.ext import commands as _commands
+
+    async def scenario():
+        cog = _cog()
+        ctx = _Ctx(_Author(1), _AdminBot())
+        try:
+            await invoke_command(cog, "metrics", ctx)
+            raise AssertionError("$metrics must be blocked when DEV_MODE is off")
+        except _commands.CheckFailure:
+            pass
+    run(scenario())
+
+
+def test_metrics_command_shows_snapshot(monkeypatch):
+    from conftest import invoke_command
+
+    import bobcoin.metrics as metrics
+    import bobcoin.settings as settings
+
+    monkeypatch.setattr(settings, "DEV_MODE", True)
+    metrics.reset()
+    metrics.incr("commands")
+    metrics.incr("ai_failures", 2)
+    metrics.set_gauge("guilds", 4)
+
+    class _RecCtx:
+        def __init__(self, author, bot):
+            self.author = author
+            self.bot = bot
+            self.sent = []
+
+        async def send(self, *a, **kw):
+            self.sent.append((a, kw))
+
+    async def scenario():
+        cog = _cog()
+        ctx = _RecCtx(_Author(1), _AdminBot())
+        await invoke_command(cog, "metrics", ctx)
+        em = ctx.sent[0][1]["embed"]
+        names = [f.name for f in em.fields]
+        assert "⏱️ Uptime" in names
+        assert "📊 Gauges" in names
+        assert "🔢 Counters" in names
+        counters = next(f.value for f in em.fields if f.name == "🔢 Counters")
+        assert "commands" in counters and "ai_failures" in counters
+    run(scenario())

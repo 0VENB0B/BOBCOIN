@@ -5,6 +5,7 @@ import re
 import discord
 from discord.ext import commands
 
+from .. import metrics
 from ..ai import BOB_SYSTEM, call_ai
 from ..helpers import parse_positive_int
 from ..settings import COMMAND_PREFIX, MAX_BET
@@ -131,9 +132,16 @@ class EventsCog(commands.Cog):
         await self.bot.process_commands(msg)
 
     @commands.Cog.listener()
+    async def on_command(self, ctx):
+        metrics.incr("commands")
+        if ctx.command is not None:
+            metrics.incr(f"command.{ctx.command.name}")
+
+    @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
         from bobcoin.cogs.economy import NotRegistered
         error = getattr(error, "original", error)
+        metrics.incr("command_errors")
 
         if isinstance(error, NotRegistered):
             return  # message already sent in cog_before_invoke
@@ -212,6 +220,16 @@ class EventsCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         await self.bot.change_presence(activity=discord.Game(name=f"{COMMAND_PREFIX}command"))
+        guilds = len(getattr(self.bot, "guilds", ()))
+        metrics.set_gauge("guilds", guilds)
+        logger.info("Ready — logged in as %s in %d guilds", getattr(self.bot, "user", "?"), guilds)
+
+    @commands.Cog.listener()
+    async def on_error(self, event, *args, **kwargs):
+        """Global safety net: unhandled gateway/listener exceptions must not
+        vanish silently — log them and bump the ops metric (P3 Ops)."""
+        logger.error("Unhandled exception in event %r", event, exc_info=True)
+        metrics.incr("event_errors")
 
 
 async def setup(bot):
