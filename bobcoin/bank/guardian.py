@@ -3,9 +3,10 @@ force collection of overdue loans."""
 
 import asyncio
 
+from ..settings import MAX_BET
 from .core import (
-    _Abort,
     _BANK_FLOOR,
+    _Abort,
     _get_db,
     _house_ref,
     _in_txn,
@@ -15,7 +16,6 @@ from .core import (
     log_history,
 )
 from .debt import house_auto_borrow
-from ..settings import MAX_BET
 
 _MIN_HOUSE_TO_GAMBLE = 100_000  # บาทต่ำสุดที่คลังต้องมีก่อนเปิดให้เล่น
 

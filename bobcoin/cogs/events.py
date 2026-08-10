@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import random
 import re
@@ -142,7 +141,7 @@ class EventsCog(commands.Cog):
             await ctx.send("ไม่มีคำสั่งนี้")
             return
         if isinstance(error, commands.CommandOnCooldown):
-            await ctx.send("ใจเย็น ลองอีกครั้งใน {:.2f} วิ".format(error.retry_after))
+            await ctx.send(f"ใจเย็น ลองอีกครั้งใน {error.retry_after:.2f} วิ")
             return
         if isinstance(error, (commands.MissingPermissions, commands.MissingAnyRole)):
             await ctx.send("ไม่มีสิทธิ์ใช้คำสั่งนี้")

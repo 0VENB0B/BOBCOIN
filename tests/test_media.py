@@ -9,10 +9,10 @@ without touching images at all.
 import asyncio
 
 import pytest
+from conftest import invoke_command
 from PIL import Image
 
 import bobcoin.cogs.media as media
-from conftest import invoke_command
 
 
 class _Avatar:

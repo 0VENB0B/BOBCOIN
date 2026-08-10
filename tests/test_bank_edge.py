@@ -8,8 +8,6 @@ and the transaction abort helper itself.
 import asyncio
 import time
 
-import pytest
-
 import bobcoin.ai
 import bobcoin.bank.core as bank_core
 from bobcoin.bank import (
@@ -17,19 +15,18 @@ from bobcoin.bank import (
     accrue_loan_interest,
     add_xp,
     ai_loan_limit,
-    pay_interest_all,
     calc_interest,
     calc_loan_limit,
     charge_wallet,
     contribute_jackpot,
     get_achievements,
-    get_bank_data,
     get_balance,
+    get_bank_data,
+    get_cooldown,
     get_history,
     get_house_balance,
     get_house_debt,
     get_jackpot_pool,
-    get_cooldown,
     get_loan_info,
     grant_achievement,
     has_transfer_relation,
@@ -40,6 +37,7 @@ from bobcoin.bank import (
     is_registered,
     log_history,
     open_account,
+    pay_interest_all,
     repay_loan,
     rob_transfer,
     set_cooldown,

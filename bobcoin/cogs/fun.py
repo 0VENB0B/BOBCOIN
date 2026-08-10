@@ -79,7 +79,7 @@ _TEXT_EMOJI = {
 
 
 def _emojify_text(text: str) -> str | None:
-    num2emo = {str(i): f":{'zero one two three four five six seven eight nine'.split()[i]}:" for i in range(10)}
+    num2emo = {str(i): f":{['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][i]}:" for i in range(10)}
     result = []
     for char in text.lower():
         if char.isdecimal():
@@ -234,7 +234,7 @@ class FunCog(commands.Cog):
                 check=lambda m: m.author == member and m.channel == ctx.channel,
                 timeout=30,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await ctx.send(f"⏰ หมดเวลา! คำตอบที่ถูกคือ **{answer}**")
             return
 

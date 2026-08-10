@@ -9,11 +9,10 @@ unregistered-reward guard.
 
 import asyncio
 
-import pytest
+from conftest import invoke_command
 
 import bobcoin.cogs.fun as fun
-from bobcoin.bank import get_balance, open_account, update_bank
-from conftest import invoke_command
+from bobcoin.bank import get_balance, open_account
 
 
 class _Avatar:
@@ -255,7 +254,7 @@ def test_quiz_timeout_shows_answer(monkeypatch):
 
     async def scenario():
         await open_account(_Author(1))
-        bot = _Bot(asyncio.TimeoutError())
+        bot = _Bot(TimeoutError())
         ctx = _Ctx(1)
         await invoke_command(_cog_with(bot), "quiz", ctx)
         assert (await get_balance(_Author(1))) == [0, 0]

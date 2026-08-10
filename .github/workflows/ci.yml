@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Lint (ruff)
+        # Config lives in pyproject.toml ([tool.ruff]); fails on any finding.
+        run: ruff check bobcoin/ tests/
+
       - name: Syntax check (py_compile)
         run: python -m py_compile main.py bobcoin/*.py bobcoin/bank/*.py bobcoin/cogs/*.py tests/*.py
 

@@ -6,7 +6,6 @@ spinning up a Discord client or emulating Firestore.
 
 import random
 
-
 # ── Blackjack ───────────────────────────────────────────────────────────────
 
 def _bj_draw() -> int:

@@ -97,12 +97,14 @@ async def _tmdb_get(path: str, params: dict[str, str | int | float]) -> dict | N
     }
     try:
         timeout = aiohttp.ClientTimeout(total=8)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(f"{_TMDB_API_BASE}{path}", headers=headers, params=request_params) as resp:
-                if resp.status >= 400:
-                    logger.warning("TMDb request failed: %s %s", path, resp.status)
-                    return None
-                return await resp.json(content_type=None)
+        async with (
+            aiohttp.ClientSession(timeout=timeout) as session,
+            session.get(f"{_TMDB_API_BASE}{path}", headers=headers, params=request_params) as resp,
+        ):
+            if resp.status >= 400:
+                logger.warning("TMDb request failed: %s %s", path, resp.status)
+                return None
+            return await resp.json(content_type=None)
     except Exception:
         logger.exception("TMDb request failed: %s", path)
         return None
@@ -173,7 +175,9 @@ async def recommend_movie(query: str | None = None) -> MovieRecommendation | Non
     if query and _GENRE_IDS.get(query.lower()) is None:
         result_pack = await _search_movies(query)
 
-    if not result_pack:
+    # A search that came back empty is the same as "not found" — fall back
+    # to a discover (top-rated) pick so the user still gets a recommendation.
+    if not result_pack or not result_pack[0]:
         result_pack = await _discover_movies(query)
 
     if not result_pack:

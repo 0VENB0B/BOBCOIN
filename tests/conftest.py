@@ -21,8 +21,9 @@ def fresh_store():
     Yields the underlying store dict so tests can reach in and mutate
     ``system/bank`` etc. directly to simulate unusual house states.
     """
-    import bobcoin.bank.core as bank_core
     from fake_firestore import FakeClient
+
+    import bobcoin.bank.core as bank_core
 
     store = {}
     bank_core._db = FakeClient(store)

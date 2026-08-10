@@ -1,7 +1,7 @@
 """House debt: the central bank can borrow (create) coins up to a ceiling and
 repays them when healthy."""
 
-from .core import _Abort, _BANK_FLOOR, _get_db, _house_ref, _in_txn, _positive_amount, logger
+from .core import _BANK_FLOOR, _Abort, _get_db, _house_ref, _in_txn, _positive_amount, logger
 
 _HOUSE_DEBT_CEILING = 50_000_000  # max the house can owe before games are blocked
 _HOUSE_BORROW_CHUNK = 1_000_000   # borrow in 1M increments

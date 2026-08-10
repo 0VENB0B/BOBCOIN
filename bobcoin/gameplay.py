@@ -2,6 +2,7 @@
 (kept separate from EconomyCog so each file stays small)."""
 
 import asyncio
+import logging
 import random
 
 import discord
@@ -13,9 +14,8 @@ from .bank import (
     charge_wallet,
     contribute_jackpot,
     get_effective_luck,
-    get_house_balance,
     get_history,
-    get_jackpot_pool,
+    get_house_balance,
     grant_achievement,
     house_can_pay_games,
     house_payout,
@@ -27,6 +27,39 @@ from .bank import (
 )
 from .games import _bj_draw, _bj_str, _bj_total, _lucky_card, _streak_effects
 from .settings import SLOT_SYMBOLS
+
+logger = logging.getLogger("bobcoin.gameplay")
+
+# Fire-and-forget background tasks must keep a reference, or CPython's GC can
+# destroy the Task mid-flight and cancel it silently (RUF006). Hold every
+# spawned task in a set until it finishes.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    """Schedule a background coroutine, keeping it alive until completion."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_on_task_done)
+    return task
+
+
+def _on_task_done(task: asyncio.Task) -> None:
+    """Drop the reference and retrieve the exception (if any).
+
+    Retrieving the exception silences the "Task exception was never retrieved"
+    warning. These are fire-and-forget tasks (log_history, XP, AI commentary),
+    so a raised exception must not crash anything — but it would be nice to see
+    it in the logs, so re-log it instead of swallowing silently.
+    """
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Background task failed", exc_info=exc)
+
+
 
 
 class _BJView(discord.ui.View):
@@ -56,7 +89,7 @@ class _BJView(discord.ui.View):
 
 class _PanelCtx:
     """Duck-type substitute for commands.Context — used by panel buttons."""
-    __slots__ = ("author", "_ch")
+    __slots__ = ("_ch", "author")
 
     def __init__(self, channel, user):
         self.author = user
@@ -136,7 +169,7 @@ async def _post_game(ctx, bet: int, won: bool, streak: int, streak_is_win: bool,
     xp_gain = max(bet // 1_000, 1)
     _, new_level, leveled_up = await add_xp(ctx.author.id, xp_gain)
     if leveled_up:
-        asyncio.create_task(ctx.send(
+        _spawn(ctx.send(
             f"⬆️ **Level Up!** {ctx.author.mention} → **Level {new_level}** 🎉",
             delete_after=10,
         ))
@@ -146,7 +179,7 @@ async def _post_game(ctx, bet: int, won: bool, streak: int, streak_is_win: bool,
         newly = await grant_achievement(ctx.author.id, key)
         if newly and key in ACHIEVEMENTS:
             icon, name, desc = ACHIEVEMENTS[key]
-            asyncio.create_task(ctx.send(
+            _spawn(ctx.send(
                 f"🏆 **Achievement Unlocked!** {icon} **{name}** — {desc}",
                 delete_after=12,
             ))
@@ -158,7 +191,7 @@ async def _run_slot(ctx, amount: int) -> None:
     if not await _begin_game(ctx, amount):
         return
     jackpot_contrib = max(amount // 100, 1)
-    jackpot_pool_task = asyncio.create_task(contribute_jackpot(jackpot_contrib))
+    jackpot_pool_task = _spawn(contribute_jackpot(jackpot_contrib))
 
     _BASE_JP = 8 / 512
     user_luck = await get_effective_luck(ctx.author.id)
@@ -194,8 +227,8 @@ async def _run_slot(ctx, amount: int) -> None:
     else:
         outcome = f"แพ้ยับ {''.join(final)} เสียเงินหมดเลย"
 
-    commentary_task = asyncio.create_task(call_ai(_SLOT_SYSTEM, [{"role": "user", "content": outcome}], fallback="", max_tokens=80))
-    streak_task = asyncio.create_task(_get_game_streak(ctx.author.id))
+    commentary_task = _spawn(call_ai(_SLOT_SYSTEM, [{"role": "user", "content": outcome}], fallback="", max_tokens=80))
+    streak_task = _spawn(_get_game_streak(ctx.author.id))
 
     _SPIN = "🌀"
     jackpot_display = await jackpot_pool_task
@@ -270,7 +303,7 @@ async def _run_slot(ctx, amount: int) -> None:
             em.add_field(name=f"🔥 {streak}x Win Streak!", value=f"+{int(bonus_pct*100)}% bonus (+{streak_bonus:,} 🪙)", inline=False)
         if commentary:
             em.add_field(name="​", value=f"*{commentary}*", inline=False)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": label, "multiplier": multiplier, "net": net}))
+        _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": label, "multiplier": multiplier, "net": net}))
         ach_keys.append("first_win")
         if streak_is_win and streak >= 4:
             ach_keys.append("streak_5")
@@ -280,7 +313,7 @@ async def _run_slot(ctx, amount: int) -> None:
         em.add_field(name=label, value=f"คืนทุน **{actual:,}** 🪙", inline=True)
         if commentary:
             em.add_field(name="​", value=f"*{commentary}*", inline=False)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "near", "multiplier": 0, "net": actual - amount}))
+        _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "near", "multiplier": 0, "net": actual - amount}))
     else:
         net = -amount
         em.add_field(name=label, value=f"**-{amount:,}** 🪙", inline=True)
@@ -291,11 +324,11 @@ async def _run_slot(ctx, amount: int) -> None:
             em.add_field(name=f"💀 {streak}x Cold Streak — Mercy", value=f"+{mercy_actual:,} 🪙 (3% คืน)", inline=False)
         if commentary:
             em.add_field(name="​", value=f"*{commentary}*", inline=False)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "lose", "multiplier": 0, "net": net}))
+        _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "lose", "multiplier": 0, "net": net}))
 
     em.set_footer(text=f"{ctx.author.display_name}  •  เดิมพัน {amount:,} เหรียญ")
     await msg.edit(embed=em)
-    asyncio.create_task(_post_game(ctx, amount, is_jackpot, streak, streak_is_win, ach_keys))
+    _spawn(_post_game(ctx, amount, is_jackpot, streak, streak_is_win, ach_keys))
 
 
 async def _run_flip(ctx, amount: int, side: str) -> None:
@@ -313,14 +346,14 @@ async def _run_flip(ctx, amount: int, side: str) -> None:
     drawn_icon = "👑" if bot_pick == 1 else "🦅"
     payout = int(amount * 1.8) if win else 0
 
-    taunt_task = asyncio.create_task(call_ai(
+    taunt_task = _spawn(call_ai(
         _FLIP_SYSTEM,
         [{"role": "user", "content": f"{ctx.author.name} เลือก{choice_name} เดิมพัน {amount:,} เหรียญ ยั่วก่อนโยนหน่อย"}],
         fallback="โยนเหรียญแล้ว... ไม่รู้จะออกอะไร",
         max_tokens=60,
     ))
-    streak_task = asyncio.create_task(_get_game_streak(ctx.author.id))
-    react_task = asyncio.create_task(call_ai(
+    streak_task = _spawn(_get_game_streak(ctx.author.id))
+    react_task = _spawn(call_ai(
         _FLIP_SYSTEM,
         [{"role": "user", "content": f"ออก{drawn_name} {ctx.author.name}{'ชนะ' if win else 'แพ้'} {amount:,} เหรียญ react สั้นๆ แซวให้หัวร้อน"}],
         fallback="ดีใจด้วย! 🎉" if win else "โชคร้ายจริงๆ 💸",
@@ -379,7 +412,7 @@ async def _run_flip(ctx, amount: int, side: str) -> None:
     em.set_footer(text=f"{ctx.author.display_name}  •  เลือก {choice_name} {choice_icon}  •  เดิมพัน {amount:,} 🪙")
     await msg.edit(embed=em)
 
-    asyncio.create_task(log_history(ctx.author.id, {"cmd": "flip", "bet": amount, "choice": choice_name, "drawn": drawn_name, "win": win, "net": net}))
+    _spawn(log_history(ctx.author.id, {"cmd": "flip", "bet": amount, "choice": choice_name, "drawn": drawn_name, "win": win, "net": net}))
     flip_ach = []
     if amount >= 1_000_000:
         flip_ach.append("high_roller")
@@ -387,7 +420,7 @@ async def _run_flip(ctx, amount: int, side: str) -> None:
         flip_ach.append("first_win")
         if streak_is_win and streak >= 4:
             flip_ach.append("streak_5")
-    asyncio.create_task(_post_game(ctx, amount, win, streak, streak_is_win, flip_ach))
+    _spawn(_post_game(ctx, amount, win, streak, streak_is_win, flip_ach))
 
 
 async def _run_lottery(ctx, ticket_cost: int, text: str) -> None:
@@ -418,14 +451,14 @@ async def _run_lottery(ctx, ticket_cost: int, text: str) -> None:
     else:
         match, win, multiplier = "ไม่ถูก", 0, 0
 
-    prophecy_task = asyncio.create_task(call_ai(
+    prophecy_task = _spawn(call_ai(
         _LOTTERY_SYSTEM,
         [{"role": "user", "content": f"{ctx.author.name} เลือกเลข {text} เดิมพัน {ticket_cost:,} เหรียญ ทำนายโชคมั่วๆ หน่อย"}],
         fallback="ดวงดาวกำลังจะบอกอะไรบางอย่าง...",
         max_tokens=80,
     ))
-    streak_task = asyncio.create_task(_get_game_streak(ctx.author.id))
-    reaction_task = asyncio.create_task(call_ai(
+    streak_task = _spawn(_get_game_streak(ctx.author.id))
+    reaction_task = _spawn(call_ai(
         _LOTTERY_SYSTEM,
         [{"role": "user", "content": f"เลขออก {drawn_str} {ctx.author.name} {'ถูก' + match if win else 'ไม่ถูกเลย'} เดิมพัน {ticket_cost:,} เหรียญ react สั้นๆ กวนๆ"}],
         fallback="ชีวิตคือความไม่แน่นอน" if not win else "สุลต่านชั่วข้ามคืน!!",
@@ -503,7 +536,7 @@ async def _run_lottery(ctx, ticket_cost: int, text: str) -> None:
 
     em.set_footer(text=f"เดิมพัน {ticket_cost:,} 🪙")
     await msg.edit(embed=em)
-    asyncio.create_task(log_history(ctx.author.id, {"cmd": "lottery", "bet": ticket_cost, "pick": text, "drawn": drawn_str, "match": match, "net": net}))
+    _spawn(log_history(ctx.author.id, {"cmd": "lottery", "bet": ticket_cost, "pick": text, "drawn": drawn_str, "match": match, "net": net}))
     lot_ach = []
     if ticket_cost >= 1_000_000:
         lot_ach.append("high_roller")
@@ -513,7 +546,7 @@ async def _run_lottery(ctx, ticket_cost: int, text: str) -> None:
             lot_ach.append("lottery_5")
         if streak_is_win and streak >= 4:
             lot_ach.append("streak_5")
-    asyncio.create_task(_post_game(ctx, ticket_cost, bool(win), streak, streak_is_win, lot_ach))
+    _spawn(_post_game(ctx, ticket_cost, bool(win), streak, streak_is_win, lot_ach))
 
 
 async def _run_bj(ctx, amount: int) -> None:
@@ -559,8 +592,8 @@ async def _run_bj(ctx, amount: int) -> None:
             em = _bj_embed(player, dealer, False, "🤝 **Push** — คืนทุน", discord.Color.orange())
             ach = []
         await ctx.send(embed=em)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "blackjack", "net": net}))
-        asyncio.create_task(_post_game(ctx, amount, net > 0, 0, False, ach))
+        _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "blackjack", "net": net}))
+        _spawn(_post_game(ctx, amount, net > 0, 0, False, ach))
         return
 
     msg = await ctx.send(embed=_bj_embed(player, dealer))
@@ -579,8 +612,8 @@ async def _run_bj(ctx, amount: int) -> None:
         net = -amount
         em = _bj_embed(player, dealer, False, f"💥 **BUST!**  **-{amount:,}** 🪙", discord.Color.red())
         await msg.edit(embed=em, view=None)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "bust", "net": net}))
-        asyncio.create_task(_post_game(ctx, amount, False, 0, False, ["high_roller"] if amount >= 1_000_000 else []))
+        _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "bust", "net": net}))
+        _spawn(_post_game(ctx, amount, False, 0, False, ["high_roller"] if amount >= 1_000_000 else []))
         return
 
     while _bj_total(dealer) < 17:
@@ -613,8 +646,8 @@ async def _run_bj(ctx, amount: int) -> None:
         result = "lose"
 
     await msg.edit(embed=em, view=None)
-    asyncio.create_task(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "p": p_total, "d": d_total, "result": result, "net": net}))
-    asyncio.create_task(_post_game(ctx, amount, net > 0, 0, False, ach))
+    _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "p": p_total, "d": d_total, "result": result, "net": net}))
+    _spawn(_post_game(ctx, amount, net > 0, 0, False, ach))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

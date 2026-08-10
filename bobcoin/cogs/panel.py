@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 
 import discord
 from discord.ext import commands
@@ -21,17 +22,18 @@ from ..bank import (
     user_withdraw,
     xp_to_level,
 )
-from ..helpers import parse_positive_int
 from ..gameplay import (
     _HOUSE_BAND_COLORS,
-    _PanelCtx,
     _get_game_streak,
+    _PanelCtx,
     _run_bj,
     _run_flip,
     _run_lottery,
     _run_slot,
+    _spawn,
 )
 from ..games import _streak_effects
+from ..helpers import parse_positive_int
 
 # Per-user cooldowns (mirrors prefix command limits) — persisted in Firestore
 _PANEL_CD = {"slot": 30, "flip": 15, "bj": 20, "lottery": 120}
@@ -209,10 +211,8 @@ class _DuelModal(discord.ui.Modal, title="⚔️ ท้าดวล"):
         raw = self.target.value.strip().strip("<@!>")
         member = None
         if raw.isdigit():
-            try:
+            with contextlib.suppress(Exception):
                 member = interaction.guild.get_member(int(raw)) or await interaction.guild.fetch_member(int(raw))
-            except Exception:
-                pass
         if member is None:
             await interaction.response.send_message("❌ หา user ไม่เจอ — ใส่ User ID ให้ถูกต้อง", ephemeral=True)
             return
@@ -439,7 +439,7 @@ class GamePanelView(discord.ui.View):
             t = f"<t:{ts}:R>" if ts else ""
             lines.append(f"{icon} **{cmd}** {net_str} {t}")
         em = discord.Embed(
-            title=f"📋 ประวัติล่าสุด",
+            title="📋 ประวัติล่าสุด",
             description="\n".join(lines),
             color=discord.Color.blurple(),
         )
@@ -522,12 +522,10 @@ class PanelCog(commands.Cog):
         if not message.guild or message.channel.id not in self._casino_ids:
             return
         if not message.author.bot:
-            try:
+            with contextlib.suppress(discord.Forbidden):
                 await message.delete()
-            except discord.Forbidden:
-                pass
         elif message.author == message.guild.me:
-            asyncio.create_task(self._auto_delete(message, delay=45))
+            _spawn(self._auto_delete(message, delay=45))
 
     @staticmethod
     async def _auto_delete(message: discord.Message, delay: int):
@@ -571,10 +569,8 @@ class PanelCog(commands.Cog):
         )
         self._casino_ids.add(channel.id)
         panel_msg = await channel.send(embed=await _build_panel_embed(), view=GamePanelView())
-        try:
+        with contextlib.suppress(discord.Forbidden):
             await panel_msg.pin()
-        except discord.Forbidden:
-            pass
 
         em = discord.Embed(
             title="✅ Casino Panel พร้อมแล้ว!",

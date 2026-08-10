@@ -5,10 +5,8 @@ covered: game keywords, all-in/half keywords, 5-digit lottery tickets,
 flip sides, amounts with commas, and non-game text.
 """
 
-import random
 
 from bobcoin.cogs.events import _parse_intent
-
 
 # ── Non-game text ───────────────────────────────────────────────────────
 
@@ -132,7 +130,7 @@ def test_parse_intent_never_raises():
         try:
             _parse_intent(text)
         except Exception:
-            raise AssertionError(f"crash on {text!r}")
+            raise AssertionError(f"crash on {text!r}") from None
 
 
 def test_amounts_with_commas_and_whitespace():

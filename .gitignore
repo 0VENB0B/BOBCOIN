@@ -16,10 +16,7 @@ venv/
 .venv/
 
 *.tmp
-mainbank.json.tmp
 
-picture.jpg
-Text.png
+# runtime image outputs (defensive — commands send via BytesIO, never saved)
 text.png
-TID.jpg
 TID.png

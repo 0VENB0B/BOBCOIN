@@ -14,9 +14,9 @@ import pytest
 from discord.ext import commands
 
 import bobcoin.cogs.events as events
+from bobcoin.bank import open_account, update_bank
 from bobcoin.cogs.events import EventsCog
 from bobcoin.settings import COMMAND_PREFIX
-from bobcoin.bank import get_balance, open_account, update_bank
 
 
 class _Avatar:

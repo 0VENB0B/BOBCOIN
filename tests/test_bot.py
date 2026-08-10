@@ -8,8 +8,6 @@ verified by intercepting load_extension rather than truly loading cogs
 
 import asyncio
 
-import pytest
-
 import bobcoin.bot as bot_module
 from bobcoin.bot import create_bot
 from bobcoin.settings import BOT_OWNER_ID, COMMAND_PREFIX

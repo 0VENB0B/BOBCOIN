@@ -6,8 +6,6 @@ All async tests are wrapped with asyncio.run() so we don't need pytest-asyncio.
 import asyncio
 import time
 
-import pytest
-
 from fake_firestore import FakeClient
 
 import bobcoin.bank as bank
@@ -19,8 +17,8 @@ from bobcoin.bank import (
     charge_wallet,
     contribute_jackpot,
     get_achievements,
-    get_bank_data,
     get_balance,
+    get_bank_data,
     get_house_balance,
     get_house_data,
     get_house_debt,

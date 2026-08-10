@@ -9,16 +9,16 @@ Command objects need to be bound to their cog + checks run manually).
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 
 import discord
 import pytest
+from conftest import invoke_command
 from discord.ext import commands
 
-import bobcoin.cogs.info as info
 from bobcoin.cogs.info import InfoCog
 from bobcoin.settings import INVITE_URL, MAX_PURGE_MESSAGES
-from conftest import invoke_command
 
 
 class _Avatar:
@@ -36,7 +36,7 @@ class _BotUser:
 class _Bot:
     latency = 0.05
     user = _BotUser()
-    guilds = ["guild-one"]
+    guilds: ClassVar[list] = ["guild-one"]
 
     def __init__(self):
         self.presence = []
@@ -57,19 +57,19 @@ class _Perms:
 
 
 class _Author:
-    def __init__(self, uid, roles=None, joined_at=datetime(2021, 2, 2, tzinfo=timezone.utc)):
+    def __init__(self, uid, roles=None, joined_at=datetime(2021, 2, 2, tzinfo=UTC)):
         self.id = uid
         self.name = "bob"
         self.display_name = "bob"
         self.roles = roles or []
         self.display_avatar = _Avatar()
-        self.created_at = datetime(2020, 6, 15, tzinfo=timezone.utc)
+        self.created_at = datetime(2020, 6, 15, tzinfo=UTC)
         self.joined_at = joined_at
         self.color = discord.Color.blue()
 
 
 class _Message:
-    created_at = datetime(2021, 5, 5, tzinfo=timezone.utc)
+    created_at = datetime(2021, 5, 5, tzinfo=UTC)
 
 
 class _Guild:
@@ -77,9 +77,9 @@ class _Guild:
     id = 123
     owner = "owner-name"
     member_count = 10
-    created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
-    channels = ["c1", "c2"]
-    emojis = ["😀", "🎰"]
+    created_at = datetime(2020, 1, 1, tzinfo=UTC)
+    channels: ClassVar[list] = ["c1", "c2"]
+    emojis: ClassVar[list] = ["😀", "🎰"]
     icon = None
 
 

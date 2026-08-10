@@ -34,10 +34,7 @@ def image_file(image, filename):
 
 async def avatar_image(member, size=128):
     avatar = getattr(member, "display_avatar", None)
-    if avatar is not None:
-        avatar = avatar.replace(size=size)
-    else:
-        avatar = member.avatar_url_as(size=size)
+    avatar = avatar.replace(size=size) if avatar is not None else member.avatar_url_as(size=size)
 
     data = BytesIO(await avatar.read())
     return Image.open(data).convert("RGBA")

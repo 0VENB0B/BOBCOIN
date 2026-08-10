@@ -8,7 +8,7 @@ single place owns transaction retry/abort semantics.
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from google.cloud.firestore import AsyncClient, Query, async_transactional
 
@@ -235,7 +235,7 @@ async def user_deposit(user, amount: int) -> list[int] | None:
 
 
 # Returns: [wallet, deposited] | None (not enough deposited) | False (house broke)
-async def user_withdraw(user, amount: int) -> list[int] | None | bool:
+async def user_withdraw(user, amount: int) -> list[int] | bool | None:
     """central bank → wallet. Returns [new_wallet, new_deposited], None, or False."""
     amount = _positive_amount(amount)
     if amount is None:
@@ -265,7 +265,7 @@ async def user_withdraw(user, amount: int) -> list[int] | None | bool:
 # ── Transfer between users ──────────────────────────────────────────────────
 
 # Returns: int (remaining wallet) | None (insufficient funds) | False (recipient not registered)
-async def transfer_to_user(sender, recipient, amount: int) -> int | None | bool:
+async def transfer_to_user(sender, recipient, amount: int) -> int | bool | None:
     amount = _positive_amount(amount)
     if amount is None:
         return None
@@ -372,7 +372,7 @@ async def has_transfer_relation(a_id: int, b_id: int, limit: int = 30) -> bool:
 # ── History ─────────────────────────────────────────────────────────────────
 
 async def log_history(user_id: int, entry: dict) -> None:
-    entry["ts"] = int(datetime.now(timezone.utc).timestamp())
+    entry["ts"] = int(datetime.now(UTC).timestamp())
     await _ref(user_id).collection("history").add(entry)
 
 

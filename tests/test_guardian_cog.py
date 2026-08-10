@@ -9,8 +9,6 @@ interest-cap writes.
 
 import asyncio
 
-import pytest
-
 import bobcoin.cogs.guardian as guardian_cog
 from bobcoin.cogs.guardian import GuardianCog
 

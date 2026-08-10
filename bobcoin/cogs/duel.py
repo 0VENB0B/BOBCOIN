@@ -13,9 +13,9 @@ from ..bank import (
     max_bet_allowed,
     update_bank,
 )
+from ..gameplay import _BJView, _spawn
 from ..games import _bj_draw, _bj_str, _bj_total, _lucky_card
 from ..helpers import parse_positive_int
-from ..gameplay import _BJView
 from ..settings import SLOT_SYMBOLS
 
 _HOUSE_CUT = 0.05
@@ -193,7 +193,8 @@ class DuelCog(commands.Cog):
     # ── Flip ──────────────────────────────────────────────────────────────────
 
     async def _flip(self, msg: discord.Message, ca: discord.Member, ta: discord.Member, bet: int, net_pot: int):
-        side_icon = lambda s: "👑 หัว" if s == "1" else "🦅 ก้อย"
+        def side_icon(s: str) -> str:
+            return "👑 หัว" if s == "1" else "🦅 ก้อย"
 
         em = discord.Embed(title="🪙 หัว/ก้อย DUEL", description=f"{ca.mention} เลือกหัวหรือก้อยก่อน", color=discord.Color.blurple())
         sv = _SideView(ca.id)
@@ -213,13 +214,13 @@ class DuelCog(commands.Cog):
         lk_c, lk_t = await asyncio.gather(get_effective_luck(ca.id), get_effective_luck(ta.id))
         win_c = max(0.08, min(0.92, lk_c / (lk_c + lk_t)))
         c_wins = random.random() < win_c
-        winner, loser = (ca, ta) if c_wins else (ta, ca)
+        winner, _loser = (ca, ta) if c_wins else (ta, ca)
 
         await update_bank(winner, net_pot)
         net_c = net_pot - bet if c_wins else -bet
         net_t = net_pot - bet if not c_wins else -bet
-        asyncio.create_task(log_history(ca.id, {"cmd": "duel_flip", "bet": bet, "vs": ta.id, "net": net_c}))
-        asyncio.create_task(log_history(ta.id, {"cmd": "duel_flip", "bet": bet, "vs": ca.id, "net": net_t}))
+        _spawn(log_history(ca.id, {"cmd": "duel_flip", "bet": bet, "vs": ta.id, "net": net_c}))
+        _spawn(log_history(ta.id, {"cmd": "duel_flip", "bet": bet, "vs": ca.id, "net": net_t}))
 
         coin_out = side_icon(c_side if c_wins else t_side)
         em = discord.Embed(title=f"🪙 {coin_out} ออก!", color=discord.Color.green() if c_wins else discord.Color.red())
@@ -250,8 +251,8 @@ class DuelCog(commands.Cog):
         if winner:
             await update_bank(winner, net_pot)
 
-        asyncio.create_task(log_history(ca.id, {"cmd": "duel_slot", "bet": bet, "vs": ta.id, "net": net_c}))
-        asyncio.create_task(log_history(ta.id, {"cmd": "duel_slot", "bet": bet, "vs": ca.id, "net": net_t}))
+        _spawn(log_history(ca.id, {"cmd": "duel_slot", "bet": bet, "vs": ta.id, "net": net_c}))
+        _spawn(log_history(ta.id, {"cmd": "duel_slot", "bet": bet, "vs": ca.id, "net": net_t}))
 
         color = discord.Color.gold() if sc_c != sc_t else discord.Color.dark_gray()
         em = discord.Embed(title="🎰 สล็อต DUEL — ผลลัพธ์", color=color)
@@ -281,7 +282,6 @@ class DuelCog(commands.Cog):
 
         def _em(phase: str = ""):
             e = discord.Embed(title="🃏 แบล็คแจ็ค DUEL", color=discord.Color.blurple())
-            d_tot = _bj_total(dealer)
             e.add_field(name=f"🏠 Dealer [{_bj_total([dealer[0]])}?]", value=_bj_str(dealer, hide_second=True), inline=False)
             e.add_field(name=f"👤 {ca.display_name} = {_bj_total(hand_c)}", value=_bj_str(hand_c), inline=True)
             e.add_field(name=f"👤 {ta.display_name} = {_bj_total(hand_t)}", value=_bj_str(hand_t), inline=True)
@@ -339,8 +339,8 @@ class DuelCog(commands.Cog):
             refund = await _refund_tie(ca, ta, net_pot)
             net_c = net_t = refund - bet
 
-        asyncio.create_task(log_history(ca.id, {"cmd": "duel_bj", "bet": bet, "vs": ta.id, "net": net_c}))
-        asyncio.create_task(log_history(ta.id, {"cmd": "duel_bj", "bet": bet, "vs": ca.id, "net": net_t}))
+        _spawn(log_history(ca.id, {"cmd": "duel_bj", "bet": bet, "vs": ta.id, "net": net_c}))
+        _spawn(log_history(ta.id, {"cmd": "duel_bj", "bet": bet, "vs": ca.id, "net": net_t}))
 
         def _rlabel(p: int, sc: int) -> str:
             if p > 21: return "💥 Bust"

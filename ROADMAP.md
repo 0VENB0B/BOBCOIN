@@ -17,14 +17,23 @@
   `get_total_outstanding_loans()` ($house / panel) เลิกสแกนทั้ง collection ทุกครั้ง
 - **แยก game logic** → `bobcoin/games.py` (pure, เทสต์ได้) และรวมโค้ดซ้ำ
   house-status เป็น `house_status_band()`
-- **ระบบเทสต์** — 351 เทสต์ (bank/games/helpers 100%, ทั้ง `bobcoin/` 72%
-  พร้อม CI fail-under gate): ครบทุก edge case (input ผิด, บัญชีหาย, budget
-  cap, cache expiry, กันปลาวาฬ, guardian/luck/force-collect) + invariant
-  tests (เงินอนุรักษ์, ไม่ติดลบ, failed op ไม่แตะ state) + property/statistical
-  tests ของเกม + command-level tests ของ economy (register/ฝาก/ถอน/โอน/ปล้น)
+- **ระบบเทสต์** — 460 เทสต์ (bank/games/helpers/components/movies/images/ai
+  100%, ทั้ง `bobcoin/` 91% พร้อม CI fail-under gate): ครบทุก edge case (input
+  ผิด, บัญชีหาย, budget cap, cache expiry, กันปลาวาฬ, guardian/luck/
+  force-collect) + invariant tests (เงินอนุรักษ์, ไม่ติดลบ, failed op ไม่แตะ
+  state) + property/statistical tests ของเกม + command-level tests ของทุก cog
+  รวม panel views/modals/setup + economy loan/repay/history/admin commands
 - **CI pipeline (GitHub Actions)** — `.github/workflows/ci.yml`: รันทุก push/PR
-  ไป `dev`/`main` = ติดตั้ง deps + `py_compile` + import check ทุกโมดูล
-  (จับ lazy-import ผิดทาง) + `pytest` + coverage `--fail-under=70`
+  ไป `dev`/`main` = ติดตั้ง deps + **`ruff check` (lint, config ใน
+  `pyproject.toml`)** + `py_compile` + import check ทุกโมดูล (จับ lazy-import
+  ผิดทาง) + `pytest` + coverage `--fail-under=70`
+- **Lint (ruff)** — `pyproject.toml` กำหนด rule set: E4/E7/E9/F (correctness),
+  I (import sorting), UP/SIM/B/RUF — ผ่านสะอาดทั้ง `bobcoin/` และ `tests/`
+- **เก็บ reference ของ background task** — helper `_spawn()` ใน `gameplay.py`
+  (ใช้ร่วมทุก cog) hold task ไว้จนเสร็จ ป้องกัน CPython GC ยกเลิก task กลางคัน
+  (RUF006) และลบ legacy files (`mainbank.json`, ภาพ asset เก่า) ทิ้งแล้ว
+- **แก้ `recommend_movie`** — ถ้า search ได้ผลว่าง ตอนนี้ fallback ไป discover
+  แทนที่จะคืน None (ก่อนหน้านี้ user ไม่ได้คำแนะนำเลย)
 - **เจอบั๊กใน fake Firestore** — `FakeTransaction.set` ไม่รองรับ `merge=True`
   (ในของจริง merge เก็บ field อื่นไว้) — เทสต์แบบละเอียดจับได้และแก้แล้ว
 - **Cooldown ย้ายเข้า Firestore แล้ว** — `get_cooldown`/`set_cooldown` ใน bank
@@ -54,15 +63,15 @@
    permission จริง (เช่น admin role) หรือจำกัด role ที่ซื้อได้ (whitelist)
 6. **Dev command ที่เหลือ** — `$setluck`, `$guardian_run` มี `is_bot_admin` กันอยู่
    แต่ควรย้ายออกไปอยู่หลัง feature flag (เช่น env `GUCOIN_DEV_MODE`)
-7. ~~**ขยายเทสต์**~~ ✅ ทำแล้วเกือบหมด — `_parse_intent` ครบ, game runners
-   (`gameplay.py` 78%), duel 73%, panel 38% (embed/guard/modals/daily/
-   auto-delete), **events 41→99%** (on_message/intent/error handler),
-   **fun 0→95%** (quiz/emoji/เรขาคณิต/mrp), **media 0→98%**, **info 0→97%**
-   (ping/profile/clear + role/permission gates), **guardian cog 0→74%**
-   (ทุก status + AI clamp), **economy 15→41%** (คำสั่งเงินที่ระดับ command),
-   **bot factory + cog wiring**, **movies 27→59%** (genre/auth/cleaning),
-   **ai 0→~100%** (no-key fallback); ยังเหลือหลักๆ คือ panel views เต็มรูปแบบ
-   และส่วน admin/dev commands ของ economy
+7. ~~**ขยายเทสต์**~~ ✅ ทำแล้ว — `_parse_intent` ครบ, game runners
+   (`gameplay.py` 78%), duel 73%, **panel 38→91%** (embed/guard/modals ทุกตัว/
+   ปุ่ม view ครบ/setup/on_message/auto-delete), **events 41→99%** (on_message/
+   intent/error handler), **fun 0→95%** (quiz/emoji/เรขาคณิต/mrp), **media
+   0→98%**, **info 0→97%** (ping/profile/clear + role/permission gates),
+   **guardian cog 0→74%** (ทุก status + AI clamp), **economy 15→92%** (ทุก
+   คำสั่งเงิน รวม loan/repay/history/admin + `_buy_role`), **bot factory + cog
+   wiring**, **movies 27→100%** (รวม `_tmdb_get`/routing), **ai 0→100%**
+   (no-key + success/error paths), **components 0→100%**, **images 0→100%**
 
 ## 🟡 P2 — ค่อยๆ ทำ
 

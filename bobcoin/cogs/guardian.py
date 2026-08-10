@@ -6,6 +6,7 @@ from discord.ext import commands, tasks
 
 from ..ai import call_ai
 from ..bank import (
+    _house_ref,
     get_bank_health,
     get_history,
     get_house_debt,
@@ -14,8 +15,6 @@ from ..bank import (
     guardian_nerf_user,
     guardian_restore_user,
     house_repay_debt,
-    _get_db,
-    _house_ref,
 )
 from ..helpers import is_bot_admin
 

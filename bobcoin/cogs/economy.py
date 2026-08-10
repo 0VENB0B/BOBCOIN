@@ -5,11 +5,9 @@ import random
 import discord
 from discord.ext import commands, tasks
 
-logger = logging.getLogger("bobcoin.economy")
-
 from ..bank import (
-    _ref,
     ACHIEVEMENTS,
+    _ref,
     accrue_loan_interest,
     ai_loan_limit,
     calc_interest,
@@ -42,7 +40,6 @@ from ..bank import (
     user_withdraw,
     xp_to_level,
 )
-from ..games import _streak_effects
 from ..gameplay import (
     _HOUSE_BAND_COLORS,
     _get_game_streak,
@@ -51,8 +48,12 @@ from ..gameplay import (
     _run_flip,
     _run_lottery,
     _run_slot,
+    _spawn,
 )
+from ..games import _streak_effects
 from ..helpers import is_bot_admin, parse_amount_or_reply, parse_positive_int
+
+logger = logging.getLogger("bobcoin.economy")
 
 
 class NotRegistered(Exception):
@@ -109,7 +110,7 @@ class EconomyCog(commands.Cog):
         try:
             msg = await self.bot.wait_for("message", check=check, timeout=30)
             nickname = msg.content.strip()[:32]
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await ctx.send("⏰ หมดเวลา ลองสมัครใหม่อีกทีนะ")
             return
 
@@ -120,7 +121,7 @@ class EconomyCog(commands.Cog):
             bio = msg2.content.strip()[:100]
             if bio == "-":
                 bio = ""
-        except asyncio.TimeoutError:
+        except TimeoutError:
             bio = ""
 
         # เก็บข้อมูล Discord + ข้อมูลที่กรอก
@@ -269,7 +270,7 @@ class EconomyCog(commands.Cog):
         em.add_field(name="👛 กระเป๋าเงิน", value=f"{wallet:,} 🪙", inline=True)
         em.add_field(name="🏛️ ฝากในคลัง", value=f"{deposited:,} 🪙", inline=True)
         await ctx.send(embed=em)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "withdraw", "amount": amount}))
+        _spawn(log_history(ctx.author.id, {"cmd": "withdraw", "amount": amount}))
 
     @commands.command(aliases=["lb"])
     async def leaderboard(self, ctx, x=3):
@@ -318,7 +319,7 @@ class EconomyCog(commands.Cog):
         em.add_field(name="🏛️ ฝากในคลัง", value=f"{deposited:,} 🪙", inline=True)
         em.set_footer(text="ถอนกลับได้ด้วย $withdraw (ขึ้นอยู่กับสถานะคลัง)")
         await ctx.send(embed=em)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "deposit", "amount": amount}))
+        _spawn(log_history(ctx.author.id, {"cmd": "deposit", "amount": amount}))
 
     @commands.command(aliases=["flipcoin", "filpcoin"])
     @commands.cooldown(1, 15, commands.BucketType.user)
@@ -366,8 +367,8 @@ class EconomyCog(commands.Cog):
         em.add_field(name="👛 กระเป๋าที่เหลือ", value=f"{result:,} 🪙", inline=False)
         em.set_thumbnail(url=member.display_avatar.url)
         await ctx.send(embed=em)
-        asyncio.create_task(log_history(ctx.author.id, {"cmd": "give", "amount": amount, "to_id": str(member.id), "to_name": member.display_name, "net": -amount}))
-        asyncio.create_task(log_history(member.id, {"cmd": "receive", "amount": amount, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": amount}))
+        _spawn(log_history(ctx.author.id, {"cmd": "give", "amount": amount, "to_id": str(member.id), "to_name": member.display_name, "net": -amount}))
+        _spawn(log_history(member.id, {"cmd": "receive", "amount": amount, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": amount}))
 
     @commands.command(aliases=["รายวัน", "เช็คอิน"])
     async def daily(self, ctx):
@@ -397,7 +398,7 @@ class EconomyCog(commands.Cog):
         em.set_footer(text="มาทุกวันได้เงินเพิ่ม • streak หายถ้าห่างเกิน 48 ชม.")
         await ctx.send(embed=em)
         if streak >= 7:
-            asyncio.create_task(_post_game(ctx, 0, True, 0, False, ["daily_7"]))
+            _spawn(_post_game(ctx, 0, True, 0, False, ["daily_7"]))
 
     @commands.command(aliases=["เลเวล", "lv", "lvl"])
     async def level(self, ctx, member: discord.Member = None):
@@ -573,8 +574,8 @@ class EconomyCog(commands.Cog):
             if not await rob_transfer(ctx.author, member, stolen):
                 await ctx.send("มีบางอย่างผิดพลาด ลองใหม่")
                 return
-            asyncio.create_task(log_history(ctx.author.id, {"cmd": "rob", "amount": stolen, "to_id": str(member.id), "to_name": member.display_name, "net": stolen}))
-            asyncio.create_task(log_history(member.id, {"cmd": "robbed", "amount": stolen, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": -stolen}))
+            _spawn(log_history(ctx.author.id, {"cmd": "rob", "amount": stolen, "to_id": str(member.id), "to_name": member.display_name, "net": stolen}))
+            _spawn(log_history(member.id, {"cmd": "robbed", "amount": stolen, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": -stolen}))
             em = discord.Embed(title="🦹 ปล้นสำเร็จ!!", color=discord.Color.green())
             em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
             em.set_thumbnail(url=member.display_avatar.url)
@@ -586,8 +587,8 @@ class EconomyCog(commands.Cog):
             got_paid = ""
             if penalty > 0 and await rob_transfer(member, ctx.author, penalty):
                 got_paid = f"\n**{member.display_name}** ได้รับค่าเสียหาย **{penalty:,}** 🪙"
-                asyncio.create_task(log_history(ctx.author.id, {"cmd": "rob", "amount": penalty, "to_id": str(member.id), "to_name": member.display_name, "net": -penalty}))
-                asyncio.create_task(log_history(member.id, {"cmd": "robbed", "amount": penalty, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": penalty}))
+                _spawn(log_history(ctx.author.id, {"cmd": "rob", "amount": penalty, "to_id": str(member.id), "to_name": member.display_name, "net": -penalty}))
+                _spawn(log_history(member.id, {"cmd": "robbed", "amount": penalty, "from_id": str(ctx.author.id), "from_name": ctx.author.display_name, "net": penalty}))
             em = discord.Embed(
                 title="🚨 โดนจับ!",
                 description=f"**{ctx.author.display_name}** ล้มเหลว เสีย **{penalty:,}** 🪙{got_paid}",

@@ -42,8 +42,10 @@ For development/testing, also install `requirements-dev.txt` (adds pytest).
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 
 > Keep tokens and the service-account JSON out of git (`.gitignore` already covers
-> `.env` and `*firebase-adminsdk*.json`). `mainbank.json` is a legacy artifact from
-> the old JSON-bank era and is no longer written.
+> `.env` and `*firebase-adminsdk*.json`). The legacy `mainbank.json` (old JSON-bank
+> era) and unused image assets (`T.jpg`, `TEST.jpg`, `TID.jpg`, `Text.png`,
+> `picture.jpg`) were removed — the media commands only need `pic.jpg`, `ID.jpg`
+> and `white.png`.
 
 ## Testing
 
@@ -53,8 +55,8 @@ python -m pytest tests/ -v
 ```
 
 The suite fakes `google.cloud.firestore` entirely, so it runs offline with zero
-credentials. **351 tests** — the money layer is at ~100%, every cog except the
-interaction-heavy panel is covered, and total `bobcoin/` coverage is **72%**
+credentials. **460 tests** — the money layer is at ~100%, every cog including
+the interaction-heavy panel, and total `bobcoin/` coverage is **91%**
 (fail-under gate in CI):
 
 - `test_bank.py` / `test_bank_edge.py` — every branch of deposit/withdraw/
@@ -87,8 +89,14 @@ interaction-heavy panel is covered, and total `bobcoin/` coverage is **72%**
   lottery tickets, flip sides, amounts with commas
 - `test_games.py` / `test_helpers.py` — property/statistical checks on the
   blackjack & streak math, amount parsing, `is_bot_admin`
-- `test_movies.py` / `test_ai.py` — TMDb genre/auth/result-cleaning logic and
-  the AI helper's no-key fallback (network never hit)
+- `test_movies.py` / `test_ai.py` — TMDb genre/auth/result-cleaning logic,
+  `_tmdb_get` error handling, `recommend_movie` routing (search → discover
+  fallback when search is empty) and the AI helper's no-key fallback +
+  full success/error paths with a faked session (network never hit)
+- `test_components.py` — the Components v2 command menu: category buttons
+  (success + error callbacks) and view construction/fallback
+- `test_images.py` — asset path resolution, font fallback, PNG file builder,
+  avatar download/URL helpers
 
 Measure coverage with:
 

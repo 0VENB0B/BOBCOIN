@@ -1,11 +1,10 @@
 """Passive rewards: interest, XP/levels, achievements, daily claim, jackpot."""
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from math import isqrt
 
 from .core import _Abort, _get_db, _house_ref, _in_txn, _positive_amount, _ref, house_payout, log_history, update_bank
-
 
 # ── Interest ─────────────────────────────────────────────────────────────────
 
@@ -122,9 +121,9 @@ _DAILY_BASE = 1_000
 _DAILY_MAX  = 8_000
 
 
-async def try_daily(user_id: int) -> tuple[int, int] | None | bool:
+async def try_daily(user_id: int) -> tuple[int, int] | bool | None:
     """Claim daily reward. Returns (reward, streak), None if too soon, or False if house is empty."""
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     user_ref = _ref(user_id)
     house_ref = _house_ref()
 

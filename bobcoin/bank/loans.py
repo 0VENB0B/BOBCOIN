@@ -1,7 +1,7 @@
 """User loans: credit limits, take/repay, daily interest accrual, AI approval."""
 
 import json as _json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .core import (
     _Abort,
@@ -57,7 +57,7 @@ async def take_loan(user_id: int, amount: int, ai_approved: int = 0) -> str | No
 
     user_ref  = _ref(user_id)
     house_ref = _house_ref()
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
 
     async def _work(t):
         u_doc = await user_ref.get(transaction=t)
@@ -143,7 +143,7 @@ async def repay_loan(user_id: int, amount: int) -> tuple[int, str | None]:
 
 async def accrue_loan_interest() -> tuple[int, int]:
     """Charge 0.3%/day interest on all outstanding user loans. Atomic per user, 23h guard."""
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     users_charged = total_interest = 0
 
     async for doc in _get_db().collection("users").stream():
