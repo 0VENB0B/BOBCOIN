@@ -2,18 +2,72 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-BANK_FILE = BASE_DIR / "mainbank.json"
 
-COMMAND_PREFIX = os.getenv("BOBCOIN_PREFIX", "$")
-MAX_BET = 1_000_000
+COMMAND_PREFIX = os.getenv("GUCOIN_PREFIX", "$")
+BOT_OWNER_ID = int(os.getenv("GUCOIN_OWNER_ID", "836652703412387850"))
+
+
+def _parse_id_set(value: str) -> frozenset[int]:
+    ids: set[int] = set()
+    for raw in value.split(","):
+        raw = raw.strip()
+        if raw.isdecimal():
+            ids.add(int(raw))
+    return frozenset(ids)
+
+
+BOT_ADMIN_ROLE_IDS = _parse_id_set(os.getenv("GUCOIN_ADMIN_ROLE_IDS", ""))
+MAX_BET = 1_000_000_000
 MAX_PURGE_MESSAGES = 100
+
+# Dev commands ($setluck, $guardian_run, ...) require this flag ON *and* an
+# admin identity — keeps dangerous toggles out of production.
+def _as_bool(value: str) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+DEV_MODE = _as_bool(os.getenv("GUCOIN_DEV_MODE", ""))
+
+# Whitelist of role IDs that $BD may sell (empty = $BD sells nothing).
+BD_ROLE_IDS = _parse_id_set(os.getenv("GUCOIN_BD_ROLE_IDS", ""))
+
+# Casino audit log — copy deleted game results to this channel (0 = disabled)
+def _parse_optional_int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+AUDIT_CHANNEL_ID = _parse_optional_int(os.getenv("GUCOIN_AUDIT_CHANNEL_ID", "0"))
+
+# Slot jackpot base rate (default 8/512 ≈ 1.56% per spin) — tunable without code
+# changes so the house win-rate can be rebalanced from collected stats.
+def _parse_optional_float(value: str, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+SLOT_JACKPOT_BASE = _parse_optional_float(os.getenv("GUCOIN_SLOT_JACKPOT_BASE", ""), 8 / 512)
+
+# Optional URL of a JSON file (e.g. a GitHub raw file you maintain) with Roblox
+# redeem codes, merged over the built-in list. Shape: {"Blox Fruits": ["CODE1", ...]}
+# (game-name keys must match the canonical names in roblox.ROBLOX_GAMES).
+ROBLOX_CODES_URL = os.getenv("GUCOIN_ROBLOX_CODES_URL", "")
+
+# Optional web-search providers for LIVE Roblox redeem-code lookups (searched
+# with the game name reported by the Roblox API). Google Custom Search is tried
+# first when both a key and a search-engine id are set, then Brave Search API.
+# With none configured the bot falls back to the built-in / external codes list.
+GOOGLE_API_KEY = os.getenv("GUCOIN_GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GUCOIN_GOOGLE_CSE_ID", "")
+BRAVE_API_KEY = os.getenv("GUCOIN_BRAVE_API_KEY", "")
 
 BOT_ICON_URL = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png"
 LIKE_ICON_URL = "https://image.similarpng.com/very-thumbnail/2020/06/Icon-like-button-transparent-PNG.png"
 INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=880963590289498142&permissions=268823616&scope=bot"
 
-SLOT_SYMBOLS = ("🍎", "🍊", "🍐")
-SLOT_SPIN_FRAMES = ("🍎🍊🍐", "🍊🍐🍎", "🍐🍎🍊")
+SLOT_SYMBOLS = ("🍎", "🍊", "🍐", "🍇", "🍋", "💎", "7️⃣", "💀")
+SLOT_SPIN_FRAMES = ("🍎🍊🍐", "🍊🍇💀", "🍐🍎🍊", "💀🍇🍎", "🍇🍐💀", "💎7️⃣🍋", "7️⃣💎💀", "🍋🍎💎")
 
 MOVIE_RECOMMENDATIONS = (
     "The Shawshank Redemption",
@@ -30,5 +84,4 @@ MOVIE_RECOMMENDATIONS = (
 
 
 def get_token():
-    return os.getenv("DISCORD_TOKEN") or os.getenv("BOBCOIN_TOKEN")
-
+    return os.getenv("DISCORD_TOKEN") or os.getenv("GUCOIN_TOKEN") or os.getenv("BOBCOIN_TOKEN")

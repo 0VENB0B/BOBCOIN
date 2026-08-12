@@ -1,15 +1,18 @@
-import discord
-
-from .bank import charge_wallet, open_account, update_bank
-from .settings import MAX_BET
+from . import settings as _settings
+from .settings import BOT_ADMIN_ROLE_IDS, BOT_OWNER_ID, MAX_BET
 
 
 def parse_positive_int(value, max_value=MAX_BET):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if not value.isdecimal() or len(value) > len(str(max_value)):
+            return None
     try:
         amount = int(value)
     except (TypeError, ValueError):
         return None
-
     if amount <= 0 or amount > max_value:
         return None
     return amount
@@ -18,51 +21,32 @@ def parse_positive_int(value, max_value=MAX_BET):
 async def parse_amount_or_reply(ctx, value, missing_message, invalid_message=None):
     amount = parse_positive_int(value)
     if amount is None:
-        message = missing_message if value is None else (invalid_message or missing_message)
+        message = missing_message if value is None else (invalid_message or f"จำนวนต้องเป็นตัวเลข 1 ถึง {MAX_BET:,}")
         await ctx.send(message)
         return None
     return amount
 
 
-def role_can_be_assigned(ctx, role):
-    if ctx.guild is None:
-        return False, "ใช้คำสั่งนี้ได้เฉพาะใน server"
-
-    me = ctx.guild.me
-    if me is not None and role >= me.top_role:
-        return False, "บอทไม่มีสิทธิ์ให้ role นี้"
-
-    owner = getattr(ctx.guild, "owner", None)
-    if owner != ctx.author and role >= ctx.author.top_role:
-        return False, "คุณให้ role ที่สูงกว่าหรือเท่ากับตัวเองไม่ได้"
-
-    return True, None
-
-
-async def buy_role(ctx, member, role, price):
-    await open_account(ctx.author)
-    if member is None:
-        await ctx.send("ใส่ชื่อที่จะซื้อของให้")
-        return
-    if role is None:
-        await ctx.send("ใส่สิ่งของที่ต้องการ")
-        return
-
-    allowed, reason = role_can_be_assigned(ctx, role)
-    if not allowed:
-        await ctx.send(reason)
-        return
-
-    if await charge_wallet(ctx.author, price) is None:
-        await ctx.send("เงินไม่พอ # จ น")
-        return
-
+async def is_bot_admin(ctx) -> bool:
+    if ctx.author.id == BOT_OWNER_ID:
+        return True
     try:
-        await member.add_roles(role)
-    except (discord.Forbidden, discord.HTTPException):
-        await update_bank(ctx.author, price)
-        await ctx.send("ให้ role ไม่สำเร็จ คืนเงินแล้ว")
-        return
+        if await ctx.bot.is_owner(ctx.author):
+            return True
+    except Exception:
+        pass
+    if not BOT_ADMIN_ROLE_IDS:
+        return False
+    return any(getattr(role, "id", None) in BOT_ADMIN_ROLE_IDS for role in getattr(ctx.author, "roles", ()))
 
-    await ctx.send(f"{member} was given {role}")
 
+async def is_dev_mode(ctx) -> bool:
+    """Dev-only commands: require GUCOIN_DEV_MODE=1 AND an admin identity.
+
+    The flag gates the command even for admins — a production instance that
+    forgets to set the env var keeps the dangerous toggles disabled.
+    Read dynamically so tests / runtime reloads can flip it without an import.
+    """
+    if not _settings.DEV_MODE:
+        return False
+    return await is_bot_admin(ctx)

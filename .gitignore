@@ -1,14 +1,22 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
 
 .env
 *.env
+*firebase-adminsdk*.json
+*service-account*.json
+*credentials*.json
+
+# local dev tooling (Freebuff desktop DB, venvs)
+.freebuff/
+venv/
+.venv/
 
 *.tmp
-mainbank.json.tmp
 
-picture.jpg
-Text.png
+# runtime image outputs (defensive — commands send via BytesIO, never saved)
 text.png
-TID.jpg
 TID.png

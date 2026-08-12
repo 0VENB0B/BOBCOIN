@@ -1,0 +1,20 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+# Curated rule set — correctness first, style light. Deliberately NOT enabled:
+#   PLE/PLR (pylint)  — zero-width-space is intentional in embeds, import style is a choice
+#   BLE/S (bandit)    — blind except is intentional resilience in async network/AI paths
+#   DTZ               — naive datetime.today() is fine for display timestamps
+#   ISC               — implicit multi-line string concat reads well in Thai embeds
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "SIM", "B", "RUF"]
+ignore = [
+  "B008",     # function calls in argument defaults (discord.Color(...) defaults are a dpy idiom)
+  "RUF001",   # ambiguous unicode in strings — intentional in Thai embeds (ℹ ➕ ➖ etc.)
+  "RUF002",   # ambiguous unicode in docstrings — intentional (× − math notation)
+  "RUF003",   # ambiguous unicode in comments — intentional (× − math notation)
+  "RUF013",   # implicit Optional — discord.py member/role=None command params
+  "E701",     # one-liner if:return — compact discord button callbacks
+  "E702",     # one-liner semicolons — compact discord button callbacks
+]
