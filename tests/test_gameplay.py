@@ -468,8 +468,9 @@ def test_lottery_loss(speed):
 class _FakeView:
     """Immediately 'times out' → player stands with whatever they have."""
 
-    def __init__(self, player_id):
+    def __init__(self, player_id, allow_double=False):
         self.action = "stand"
+        self.allow_double = allow_double
 
     async def wait(self):
         return True
@@ -568,4 +569,286 @@ def test_bj_loss(speed, stand_view):
         assert (await get_balance(_Author(1)))[0] == wallet0 - 10_000
         entries = await get_history(1, limit=10)
         assert entries[0]["cmd"] == "bj" and entries[0]["result"] == "lose"
+    asyncio.run(scenario())
+
+
+# ── Blackjack: Double Down ──────────────────────────────────────────────
+
+class _DoubleView:
+    """Presses Double Down when offered (first two cards), else stands."""
+
+    def __init__(self, player_id, allow_double=False):
+        self.action = "double" if allow_double else "stand"
+        self.allow_double = allow_double
+
+    async def wait(self):
+        return False
+
+
+@pytest.fixture
+def double_view(monkeypatch):
+    monkeypatch.setattr(gp, "_BJView", _DoubleView)
+
+
+def test_bj_double_down_wins_on_doubled_bet(speed, double_view):
+    """Double Down doubles the bet, draws one card, and settles on 2x stake."""
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        orig_lc, orig_bd = gp._lucky_card, gp._bj_draw
+        try:
+            gp._lucky_card = _seq([10, 9, 2])   # 19 → double draw 2 → 21
+            gp._bj_draw = _seq([10, 7])         # dealer 17
+            await gp._run_bj(ctx, 10_000)
+        finally:
+            gp._lucky_card, gp._bj_draw = orig_lc, orig_bd
+        await _drain()
+
+        w = (await get_balance(_Author(1)))[0]
+        assert w == wallet0 - 20_000 + 36_000      # 1.8x on the doubled bet
+        assert await get_house_balance() == 10_000_000 + 20_000 - 36_000
+        entries = await get_history(1, limit=10)
+        assert entries[0]["cmd"] == "bj"
+        assert entries[0]["bet"] == 20_000 and entries[0]["doubled"] is True
+        assert entries[0]["result"] == "win"
+        assert (await get_game_stats("bj"))["bets"] == 20_000
+    asyncio.run(scenario())
+
+
+def test_bj_double_down_insufficient_funds_stands(speed, double_view):
+    """Can't afford the double → the hand continues on the original bet."""
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store, wallet=15_000)          # only 5k left after the first bet
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        orig_lc, orig_bd = gp._lucky_card, gp._bj_draw
+        try:
+            gp._lucky_card = _seq([10, 9])      # 19 (no extra draw — double refused)
+            gp._bj_draw = _seq([10, 7])         # dealer 17
+            await gp._run_bj(ctx, 10_000)
+        finally:
+            gp._lucky_card, gp._bj_draw = orig_lc, orig_bd
+        await _drain()
+
+        w = (await get_balance(_Author(1)))[0]
+        assert w == wallet0 - 10_000 + 18_000      # settled on the original bet
+        entries = await get_history(1, limit=10)
+        assert entries[0]["cmd"] == "bj"
+        assert entries[0]["bet"] == 10_000 and entries[0]["doubled"] is False
+    asyncio.run(scenario())
+
+
+# ── Slots: replay view ──────────────────────────────────────────────────
+
+def test_slot_final_message_attaches_replay_view(speed):
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        orig_choice, orig_random = gp.random.choice, gp.random.random
+        try:
+            gp.random.choice = _pick_from(["🍎", "🍊", "🍐"])
+            gp.random.random = lambda: 0.99
+            await gp._run_slot(ctx, 10_000)
+        finally:
+            gp.random.choice, gp.random.random = orig_choice, orig_random
+        await _drain()
+        msg = ctx.sent[0][2]
+        view = msg.edits[-1].get("view")
+        assert view is not None
+        assert isinstance(view, gp._SlotReplayView)
+        assert view.amount == 10_000 and view.author_id == 1
+    asyncio.run(scenario())
+
+
+def test_slot_replay_runs_once_then_respects_cooldown(monkeypatch):
+    """Replay re-runs the slot with the same bet, then honors the persisted
+    panel cooldown so a user can't chain spins for free."""
+    runs = []
+
+    async def _fake_run(ctx, amount):
+        runs.append((ctx, amount))
+
+    monkeypatch.setattr(gp, "_run_slot", _fake_run)
+
+    class _Resp:
+        def __init__(self):
+            self.deferred = None
+            self.messages = []
+
+        async def defer(self, **kw):
+            self.deferred = kw
+
+        async def send_message(self, content=None, **kw):
+            self.messages.append((content, kw))
+
+    class _It:
+        def __init__(self, uid):
+            self.user = _Author(uid)
+            self.response = _Resp()
+
+    async def scenario():
+        await _setup(bank_core._db._store)
+        view = gp._SlotReplayView(object(), _Author(1), 10_000)
+        await view.replay.callback(_It(1))
+        assert len(runs) == 1 and runs[0][1] == 10_000
+        assert runs[0][0].author.id == 1
+        await view.replay.callback(_It(1))          # same window → blocked
+        assert len(runs) == 1
+    asyncio.run(scenario())
+
+
+def test_get_game_streak_counts_rps(monkeypatch):
+    """RPS results participate in streaks just like slot/flip/lottery."""
+    import types as _types
+
+    ticks = iter([100, 200, 300])            # oldest → newest log timestamps
+
+    class _DT:
+        @classmethod
+        def now(cls, tz=None):
+            return _types.SimpleNamespace(timestamp=lambda: next(ticks))
+
+    monkeypatch.setattr(bank_core, "datetime", _DT)
+
+    async def scenario():
+        await _setup(bank_core._db._store)
+        from bobcoin.bank import log_history
+        await log_history(1, {"cmd": "rps", "net": 800})
+        await log_history(1, {"cmd": "rps", "net": 800})
+        n, is_win = await gp._get_game_streak(1)
+        assert n == 2 and is_win is True
+        await log_history(1, {"cmd": "rps", "net": -500})
+        n2, _ = await gp._get_game_streak(1)
+        assert n2 == 1                                 # loss streak of 1
+    asyncio.run(scenario())
+
+
+# ── Rock Paper Scissors ────────────────────────────────────────────────
+
+class _RPSFakeView:
+    def __init__(self, player_id, choice="rock", timed_out=False):
+        self.choice = choice if not timed_out else None
+        self._t = timed_out
+
+    async def wait(self):
+        return self._t
+
+
+def _rps_view(choice="rock", timed_out=False):
+    def _factory(player_id):
+        return _RPSFakeView(player_id, choice=choice, timed_out=timed_out)
+    return _factory
+
+
+def test_rps_win_pays_1_8x(speed, monkeypatch):
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        monkeypatch.setattr(gp, "_RPSView", _rps_view("rock"))
+        orig = gp.random.random
+        try:
+            gp.random.random = lambda: 0.0      # < win_thresh → bot loses
+            await gp._run_rps(ctx, 10_000)
+        finally:
+            gp.random.random = orig
+        await _drain()
+
+        w = (await get_balance(_Author(1)))[0]
+        assert w == wallet0 - 10_000 + 18_000      # 1.8x
+        assert await get_house_balance() == 10_000_000 + 10_000 - 18_000
+        entries = await get_history(1, limit=10)
+        assert entries[0]["cmd"] == "rps" and entries[0]["result"] == "win"
+        assert entries[0]["pick"] == "rock" and entries[0]["bot"] == "scissors"
+        assert entries[0]["net"] == 8_000
+        assert (await get_game_stats("rps"))["house_wins"] == 0
+    asyncio.run(scenario())
+
+
+def test_rps_tie_refunds(speed, monkeypatch):
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        monkeypatch.setattr(gp, "_RPSView", _rps_view("rock"))
+        orig = gp.random.random
+        try:
+            gp.random.random = lambda: 0.4       # between win & tie thresholds
+            await gp._run_rps(ctx, 10_000)
+        finally:
+            gp.random.random = orig
+        await _drain()
+
+        assert (await get_balance(_Author(1)))[0] == wallet0      # refunded
+        assert await get_house_balance() == 10_000_000
+        entries = await get_history(1, limit=10)
+        assert entries[0]["cmd"] == "rps" and entries[0]["result"] == "tie"
+        assert entries[0]["bot"] == "rock"
+        assert entries[0]["net"] == 0
+    asyncio.run(scenario())
+
+
+def test_rps_loss(speed, monkeypatch):
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        monkeypatch.setattr(gp, "_RPSView", _rps_view("rock"))
+        orig = gp.random.random
+        try:
+            gp.random.random = lambda: 0.9       # bot beats player
+            await gp._run_rps(ctx, 10_000)
+        finally:
+            gp.random.random = orig
+        await _drain()
+
+        assert (await get_balance(_Author(1)))[0] == wallet0 - 10_000
+        entries = await get_history(1, limit=10)
+        assert entries[0]["cmd"] == "rps" and entries[0]["result"] == "lose"
+        assert entries[0]["bot"] == "paper"
+        assert (await get_game_stats("rps"))["house_wins"] == 1
+    asyncio.run(scenario())
+
+
+def test_rps_timeout_refunds(speed, monkeypatch):
+    async def scenario():
+        store = bank_core._db._store
+        await _setup(store)
+        ctx = _Ctx(1)
+        wallet0 = (await get_balance(_Author(1)))[0]
+
+        monkeypatch.setattr(gp, "_RPSView", _rps_view("rock", timed_out=True))
+        await gp._run_rps(ctx, 10_000)
+        await _drain()
+
+        assert (await get_balance(_Author(1)))[0] == wallet0      # nothing lost
+        assert await get_house_balance() == 10_000_000
+        assert await get_history(1) == []                          # no game logged
+    asyncio.run(scenario())
+
+
+def test_rps_blocked_when_no_funds(speed, monkeypatch):
+    async def scenario():
+        await house_receive(10_000_000)
+        await open_account(_Author(1))              # wallet 0
+        ctx = _Ctx(1)
+        monkeypatch.setattr(gp, "_RPSView", _rps_view("rock"))
+
+        await gp._run_rps(ctx, 5_000)
+
+        assert (await get_balance(_Author(1)))[0] == 0
+        assert await get_house_balance() == 10_000_000
+        assert await get_history(1) == []
     asyncio.run(scenario())

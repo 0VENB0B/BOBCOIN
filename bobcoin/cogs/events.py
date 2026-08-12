@@ -29,6 +29,7 @@ _GAME_KEYWORDS = {
     "slot":    ["slot", "สล็อต"],
     "flip":    ["flip", "ทอยเหรียญ", "หัวก้อย", "โยนเหรียญ", "ฟลิป"],
     "lottery": ["lottery", "หวย", "ลอตเตอรี่", "ลอต"],
+    "roblox":  ["roblox", "แมพ", "แมป", "หาแมพ", "แนะนำแมพ"],
 }
 _ALLIN_KW  = ["all in", "allin", "ทุ่มหมด", "ทั้งหมด", "หมดตัว", "หมดเลย", "ทุ่มทั้งหมด"]
 _HALF_KW   = ["ครึ่ง", "half", "ครึ่งนึง"]
@@ -72,6 +73,9 @@ def _parse_intent(text: str) -> dict | None:
             side = random.choice(["1", "2"])
         return {"game": "flip", "amount": amount_spec, "side": side}
 
+    if game == "roblox":
+        return {"game": "roblox", "amount": amount_spec}
+
     return {"game": "slot", "amount": amount_spec}
 
 
@@ -95,7 +99,7 @@ class EventsCog(commands.Cog):
 
         amount = min(max(amount, 1), MAX_BET)
 
-        game_labels = {"slot": "สล็อต 🎰", "flip": "ทอยเหรียญ 🪙", "lottery": "หวย 🎟️"}
+        game_labels = {"slot": "สล็อต 🎰", "flip": "ทอยเหรียญ 🪙", "lottery": "หวย 🎟️", "roblox": "แมพ Roblox 🎮"}
 
         if game == "slot":
             msg.content = f"{COMMAND_PREFIX}slot {amount}"
@@ -120,6 +124,10 @@ class EventsCog(commands.Cog):
                 return
             msg.content = f"{COMMAND_PREFIX}lottery {ticket} {amount}"
             situation = f'{msg.author.display_name} บอกว่า "{user_text}" อยากเล่นหวยเลข {ticket} {amount:,} เหรียญ ตอบสั้นๆ แบบ BOB'
+
+        elif game == "roblox":
+            msg.content = f"{COMMAND_PREFIX}roblox"
+            situation = f'{msg.author.display_name} อยากได้แมพ Roblox ชั้นนำ แนะนำสั้นๆ แบบ BOB แล้วเปิดแมพให้ดู'
 
         # generate confirm ด้วย AI (parallel กับ process_commands จะรันหลัง)
         confirm = await call_ai(

@@ -536,6 +536,39 @@ def test_bjgame_runs_and_validates(monkeypatch):
     run(scenario())
 
 
+def test_rps_runs_game(monkeypatch):
+    calls = []
+
+    async def _fake(ctx, amount):
+        calls.append((ctx, amount))
+
+    monkeypatch.setattr(economy, "_run_rps", _fake)
+
+    async def scenario():
+        await _setup_user(1, 10_000)
+        ctx = _Ctx(_Member(1))
+        await invoke_command(_cog(_Bot()), "rps", ctx, "500")
+        assert calls and calls[0][1] == 500
+    run(scenario())
+
+
+def test_rps_invalid_amount_rejected(monkeypatch):
+    calls = []
+
+    async def _fake(ctx, amount):
+        calls.append((ctx, amount))
+
+    monkeypatch.setattr(economy, "_run_rps", _fake)
+
+    async def scenario():
+        await _setup_user(1, 10_000)
+        ctx = _Ctx(_Member(1))
+        await invoke_command(_cog(_Bot()), "rps", ctx, "abc")
+        assert any("ตัวเลข" in s[0][0] for s in ctx.sent)
+        assert not calls
+    run(scenario())
+
+
 def test_withdraw_invalid_amount_message():
     async def scenario():
         await _setup_user(1, 10_000)

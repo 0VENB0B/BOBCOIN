@@ -29,6 +29,7 @@ from ..gameplay import (
     _run_bj,
     _run_flip,
     _run_lottery,
+    _run_rps,
     _run_slot,
     _spawn,
 )
@@ -37,7 +38,7 @@ from ..helpers import parse_positive_int
 from ..settings import AUDIT_CHANNEL_ID
 
 # Per-user cooldowns (mirrors prefix command limits) — persisted in Firestore
-_PANEL_CD = {"slot": 30, "flip": 15, "bj": 20, "lottery": 120}
+_PANEL_CD = {"slot": 30, "flip": 15, "bj": 20, "lottery": 120, "rps": 15}
 
 
 async def _cd_remaining(user_id: int, game: str) -> float:
@@ -75,8 +76,9 @@ async def _build_panel_embed() -> discord.Embed:
         value=(
             "🎰 **สล็อต** — 3 ตัวเหมือน Jackpot *(8x / 15x / 20x)*\n"
             "🪙 **หัว/ก้อย** — ทาย 50/50 ชนะ **1.8x**\n"
-            "🃏 **แบล็คแจ็ค** — Hit/Stand vs Dealer *(1.8x | BJ 2.5x)*\n"
-            "🎟️ **หวย 5 ตัว** — ถูก 5 ตัว **50x** | 4 ตัว 8x | 3 ตัว 3x"
+            "🃏 **แบล็คแจ็ค** — Hit/Double/Stand vs Dealer *(1.8x | BJ 2.5x)*\n"
+            "🎟️ **หวย 5 ตัว** — ถูก 5 ตัว **50x** | 4 ตัว 8x | 3 ตัว 3x\n"
+            "✊ **เป่ายิ้งฉุบ** — ค้อน/กรรไกร/กระดาษ ชนะ **1.8x** เสมอคืนเงิน"
         ),
         inline=False,
     )
@@ -137,6 +139,19 @@ class _BJModal(discord.ui.Modal, title="🃏 แบล็คแจ็ค"):
         await _cd_set(interaction.user.id, "bj")
         await interaction.response.defer(thinking=False)
         await _run_bj(_PanelCtx(interaction.channel, interaction.user), bet)
+
+
+class _RPSModal(discord.ui.Modal, title="✊ เป่ายิ้งฉุบ"):
+    amount = discord.ui.TextInput(label="จำนวนเดิมพัน 🪙", placeholder="เช่น 1000", min_length=1, max_length=12)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        bet = parse_positive_int(self.amount.value)
+        if not bet:
+            await interaction.response.send_message("💸 จำนวนเงินไม่ถูกต้อง", ephemeral=True)
+            return
+        await _cd_set(interaction.user.id, "rps")
+        await interaction.response.defer(thinking=False)
+        await _run_rps(_PanelCtx(interaction.channel, interaction.user), bet)
 
 
 class _LotteryModal(discord.ui.Modal, title="🎟️ หวย 5 ตัว"):
@@ -288,6 +303,12 @@ class GamePanelView(discord.ui.View):
         if not await self._guard(interaction, "lottery"):
             return
         await interaction.response.send_modal(_LotteryModal())
+
+    @discord.ui.button(label="✊ RPS", style=discord.ButtonStyle.green, custom_id="panel:rps", row=0)
+    async def rps_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self._guard(interaction, "rps"):
+            return
+        await interaction.response.send_modal(_RPSModal())
 
     # ── Row 1: Finance ─────────────────────────────────────────────────────────
 

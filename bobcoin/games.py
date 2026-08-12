@@ -47,3 +47,30 @@ def _streak_effects(streak: int, is_win: bool, bet: int) -> tuple[float, int]:
     if not is_win and streak >= 5:
         return 0.0, int(bet * 0.03)  # 3% mercy refund
     return 0.0, 0
+
+
+# ── Rock-Paper-Scissors ────────────────────────────────────────────────────────
+
+RPS_CHOICES = {"rock": "🪨 ค้อน", "scissors": "✂️ กรรไกร", "paper": "📄 กระดาษ"}
+
+
+def _rps_beats(a: str, b: str) -> bool:
+    """True when move ``a`` beats move ``b`` (ค้อน > กรรไกร > กระดาษ > ค้อน)."""
+    return {"rock": "scissors", "scissors": "paper", "paper": "rock"}[a] == b
+
+
+def _rps_winner(p1: str, p2: str) -> int:
+    """1 if p1 beats p2, -1 if p2 beats p1, 0 for a tie."""
+    if p1 == p2:
+        return 0
+    return 1 if _rps_beats(p1, p2) else -1
+
+
+def _rps_move_that_beats(choice: str) -> str:
+    """The move that defeats ``choice`` (used by the bot when it wins)."""
+    return next(m for m in RPS_CHOICES if _rps_beats(m, choice))
+
+
+def _rps_move_that_loses_to(choice: str) -> str:
+    """The move that loses to ``choice`` (used by the bot when it lets you win)."""
+    return next(m for m in RPS_CHOICES if _rps_beats(choice, m))

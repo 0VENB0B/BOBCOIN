@@ -42,6 +42,36 @@
 - **`$rob` เป็น atomic แล้ว** — `rob_transfer()` ใน bank core ย้ายเงินเป้า→ผู้ปล้น
   (และค่าปรับกลับทาง) ใน transaction เดียว + log history `rob`/`robbed`
 
+## 🎮 ทำแล้ว (รอบนี้ — ความสนุก/ความเล่นได้จริง)
+
+- **`$roblox [แนวเกม|ชื่อแมพ]`** — แนะนำแมพ Roblox ชั้นนำ 19 เกม (Adopt Me, Blox Fruits, DOORS,
+  Brookhaven, Bloxburg, MM2, Piggy, TSB, Slap Battles, Islands …) พร้อม**ข้อมูลสดจาก Roblox
+  public API** (`games.roblox.com` สถิติคนเล่น/ยอดเข้าชม/favorites + `thumbnails.roblox.com`
+  รูปแมพ — ไม่ต้องใช้ key) และ fallback เป็นรายการสำรองเมื่อ API ล่ม
+  (`bobcoin/roblox.py`, โมเดลเดียวกับ `movies.py`)
+  - **แนะนำแบบข้อมูลจริงนำ** — เมื่อ API ให้คนเล่นจริงได้ การสุ่มจะเลือกจาก **ท็อป 5 แมพ
+    ที่มีคนเล่นมากสุด** ของแนวที่เลือก (ไม่ใช่สุ่มแบนๆ ทั้งลิสต์; `_TOP_K` ใน roblox.py)
+  - **🎁 โค้ดเกม (redeem codes)** — **ค้นหาสดจากเว็บด้วยชื่อแมพที่ได้จาก API** (Google
+    Custom Search ก่อน, Brave Search เป็นตัวเลือกแทน — ตั้ง `GUCOIN_GOOGLE_API_KEY` +
+    `GUCOIN_GOOGLE_CSE_ID` หรือ `GUCOIN_BRAVE_API_KEY`) ดึงโค้ดจาก title/snippet ผลค้นหา
+    (regex + stoplist, เรียงตามความถี่, ตัดชื่อแมพ/คำธรรมดาออก, cache 24 ชม. — ถ้าค้น
+    แล้วว่าง cache แค่ 10 นาทีกันยิงซ้ำ); ยังไม่ได้ตั้ง key → ใช้ลิสต์ในบอท (Blox Fruits,
+    Bee Swarm, TDS, King Legacy, TSB, Slap Battles …) แล้วค่อย merge
+    `GUCOIN_ROBLOX_CODES_URL`; โชว์ใน embed + ปุ่ม 🎁 (ephemeral ดูทั้งหมด)
+  - View โต้ตอบ: 🔄 สุ่มแมพใหม่, 📂 เลือกแนวเกม (จำลองชีวิต/ต่อสู้/สยองขวัญ/Obby/RPG),
+    🎮 เปิดเกม (link), และ **👥 ชวนเพื่อน** → เลือกเพื่อน (UserSelect สูงสุด 5 คน)
+    → แท็ก + ส่ง embed ชวนเล่นพร้อมปุ่มเข้าร่วม (เก็บบันทึกว่าใครชวน)
+  - คุยกับบอทว่า `@BOB แนะนำแมพ` / `หาแมพ` ก็เปิดได้ (intent ใหม่ใน `events.py`)
+  - ล็อก API 5 นาทีกันยิงซ้ำ + `$roblox <ชื่อแมพ>` ค้นตามชื่อได้
+- **`$rps <amount>` (เป่ายิ้งฉุบ)** — เกมใหม่ vs BOB: ชนะ 1.8x / เสมอคืนเงิน / แพ้เสียเดิมพัน,
+  Luck ส่งผลต่ออัตราชนะ, streak bonus + mercy เหมือนเกมอื่น, ลงสถิติ + ประวัติ + XP,
+  มีปุ่มใน casino panel ด้วย (`_run_rps` + `_RPSView` + `_RPSModal`)
+- **Blackjack Double Down** — ปุ่ม Double ⬇️ ตอนไพ่ 2 ใบแรก: เดิมพัน 2 เท่า รับไพ่อีก 1 ใบแล้วจบ
+  (เงินไม่พอ → ถือว่า Stand) เฉพาะเกมเดี่ยว (duel ยังคง Hit/Stand ธรรมดา)
+- **Quiz เป็นแบบเลือกตอบ** — AI ออกข้อสอบพร้อม 4 ตัวเลือก กดปุ่มตอบ ตัวถูกขึ้นเขียว ตัวผิดขึ้นแดง
+  (AI ไม่ให้ตัวเลือก → สร้างตัวลวงอัตโนมัติ, AI ล่ม → คณิตศาสตร์ fallback เดิม)
+- **สล็อตเล่นซ้ำได้** — ผลสล็อตมีปุ่ม 🔄 เล่นอีก (เดิมพันเท่าเดิม) กับ ❌ ปิด
+
 ## 🔴 P0 — ทำก่อน (ช่องโหว่เชิงปฏิบัติ)
 
 1. ~~**Cooldown เก็บใน RAM**~~ ✅ ทำแล้ว — เก็บใน Firestore (`cd` ใน doc user)

@@ -48,6 +48,7 @@ from ..gameplay import (
     _run_bj,
     _run_flip,
     _run_lottery,
+    _run_rps,
     _run_slot,
     _spawn,
 )
@@ -526,7 +527,7 @@ class EconomyCog(commands.Cog):
         if not data:
             await ctx.send("📭 ยังไม่มีสถิติเกมเลย เล่นก่อนสิ!")
             return
-        _ICON = {"slot": "🎰", "flip": "🪙", "lottery": "🎟️", "bj": "🃏"}
+        _ICON = {"slot": "🎰", "flip": "🪙", "lottery": "🎟️", "bj": "🃏", "rps": "✊"}
         em = discord.Embed(title="📊 สถิติ House Win Rate", color=discord.Color.blurple())
         total_games = sum(int(g.get("games", 0)) for g in data.values())
         for game, g in sorted(data.items()):
@@ -567,6 +568,15 @@ class EconomyCog(commands.Cog):
         if amount is None:
             return
         await _run_bj(ctx, amount)
+
+    @commands.command(aliases=["kps", "เป่ายิ้งฉุบ", "rockpaperscissors"])
+    @commands.cooldown(1, 15, commands.BucketType.user)
+    async def rps(self, ctx, amount=None):
+        """$rps <amount> — เป่ายิ้งฉุบ vs BOB ชนะได้ 1.8x เสมอได้คืน"""
+        amount = await parse_amount_or_reply(ctx, amount, "ใส่เงินเดิมพันด้วย! เป่ายิ้งฉุบเลย ✊")
+        if amount is None:
+            return
+        await _run_rps(ctx, amount)
 
     @commands.command(aliases=["ปล้น", "steal"])
     @commands.cooldown(1, 60, commands.BucketType.user)
@@ -651,7 +661,7 @@ class EconomyCog(commands.Cog):
             "deposit": "📥", "withdraw": "📤", "give": "💸",
             "receive": "📨", "interest": "💹", "daily": "🎁",
             "loan": "💳", "repay": "✅", "loan_interest": "📈",
-            "rob": "🦹", "robbed": "🚨",
+            "rob": "🦹", "robbed": "🚨", "rps": "✊",
         }
 
         def _net(e):
@@ -696,6 +706,10 @@ class EconomyCog(commands.Cog):
                 res = e.get("result", "?")
                 res_label = {"win": "✅ ชนะ", "lose": "❌ แพ้", "bust": "💥 Bust", "push": "🤝 Push", "blackjack": "🃏 BJ!"}.get(res, res)
                 lines.append(f"{icon} **Blackjack** {res_label} • {_net(e)} • {t}")
+            elif cmd == "rps":
+                res = e.get("result", "?")
+                res_label = {"win": "✅ ชนะ", "lose": "❌ แพ้", "tie": "🤝 เสมอ"}.get(res, res)
+                lines.append(f"{icon} **เป่ายิ้งฉุบ** {res_label} • {_net(e)} • {t}")
             else:
                 lines.append(f"📋 `{cmd}` {_net(e)} • {t}")
 

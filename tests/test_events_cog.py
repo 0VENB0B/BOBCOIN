@@ -306,6 +306,18 @@ def test_flip_no_side_randomly_picked(fake_ai, monkeypatch):
     run(scenario())
 
 
+def test_roblox_intent_rewrites_to_roblox_command(fake_ai):
+    async def scenario():
+        bot = _Bot()
+        msg = _Msg(f"{_mention(bot.user.id)} แนะนำแมพ roblox หน่อย", _Author(1),
+                   mentions=[bot.user])
+        await _cog(bot).on_message(msg)
+        assert bot.processed == [msg]
+        assert msg.content == f"{COMMAND_PREFIX}roblox"
+        assert msg.replies, "confirm message must be sent"
+    run(scenario())
+
+
 # ── on_command_error ──────────────────────────────────────────────────
 
 def _error_reply(error):

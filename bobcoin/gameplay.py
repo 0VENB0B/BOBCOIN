@@ -14,6 +14,7 @@ from .bank import (
     add_xp,
     charge_wallet,
     contribute_jackpot,
+    get_cooldown,
     get_effective_luck,
     get_history,
     get_house_balance,
@@ -24,13 +25,27 @@ from .bank import (
     log_history,
     max_bet_allowed,
     record_game_outcome,
+    set_cooldown,
     trigger_jackpot,
     update_bank,
 )
-from .games import _bj_draw, _bj_str, _bj_total, _lucky_card, _streak_effects
+from .games import (
+    RPS_CHOICES,
+    _bj_draw,
+    _bj_str,
+    _bj_total,
+    _lucky_card,
+    _rps_move_that_beats,
+    _rps_move_that_loses_to,
+    _rps_winner,
+    _streak_effects,
+)
 from .settings import SLOT_JACKPOT_BASE, SLOT_SYMBOLS
 
 logger = logging.getLogger("bobcoin.gameplay")
+
+# Slot replay buttons reuse the panel's persisted per-game cooldown (seconds).
+_PANEL_SLOT_CD = 30
 
 # Fire-and-forget background tasks must keep a reference, or CPython's GC can
 # destroy the Task mid-flight and cancel it silently (RUF006). Hold every
@@ -83,10 +98,15 @@ async def drain_background_tasks(timeout: float = 5.0) -> int:
 
 
 class _BJView(discord.ui.View):
-    def __init__(self, player_id: int):
+    def __init__(self, player_id: int, allow_double: bool = False):
         super().__init__(timeout=30)
         self.player_id = player_id
         self.action: str | None = None
+        # Double Down is only offered on the first two cards (solo games).
+        # Duels keep the classic Hit/Stand (allow_double=False) so both players
+        # stay on the same bet.
+        if not allow_double:
+            self.remove_item(self.double_down)
 
     @discord.ui.button(label="Hit 🃏", style=discord.ButtonStyle.green)
     async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -94,6 +114,15 @@ class _BJView(discord.ui.View):
             await interaction.response.send_message("ไม่ใช่เกมของแก!", ephemeral=True)
             return
         self.action = "hit"
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Double ⬇️", style=discord.ButtonStyle.blurple)
+    async def double_down(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.player_id:
+            await interaction.response.send_message("ไม่ใช่เกมของแก!", ephemeral=True)
+            return
+        self.action = "double"
         self.stop()
         await interaction.response.defer()
 
@@ -119,6 +148,47 @@ class _PanelCtx:
         return await self._ch.send(*a, **kw)
 
 
+def _ctx_channel(ctx):
+    """Resolve the message target from a real Context or a _PanelCtx."""
+    return getattr(ctx, "channel", None) or getattr(ctx, "_ch", None)
+
+
+class _SlotReplayView(discord.ui.View):
+    """Attached to the final slot embed — one-click replay of the same bet."""
+
+    def __init__(self, channel, author, amount: int):
+        super().__init__(timeout=60)
+        self.channel = channel
+        self.author_id = author.id
+        self.amount = amount
+
+    async def _owner(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message("ไม่ใช่เกมของแก!", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="🔄 เล่นอีก", style=discord.ButtonStyle.blurple)
+    async def replay(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self._owner(interaction):
+            return
+        # Replay respects the same persisted cooldown as the panel slot button
+        # (Firestore-backed, survives restarts) — no free spin-spamming.
+        remaining = await get_cooldown(interaction.user.id, "panel_slot", _PANEL_SLOT_CD)
+        if remaining > 0:
+            await interaction.response.send_message(f"⏳ รออีก **{remaining:.0f}** วิ ก่อนหมุนต่อ", ephemeral=True)
+            return
+        await set_cooldown(interaction.user.id, "panel_slot")
+        await interaction.response.defer()
+        await _run_slot(_PanelCtx(self.channel, interaction.user), self.amount)
+
+    @discord.ui.button(label="❌ ปิด", style=discord.ButtonStyle.secondary)
+    async def close(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self._owner(interaction):
+            return
+        await interaction.response.edit_message(view=None)
+
+
 _HOUSE_BAND_COLORS = (
     discord.Color.green(),
     discord.Color.yellow(),
@@ -129,12 +199,13 @@ _HOUSE_BAND_COLORS = (
 _SLOT_SYSTEM  = BOB_SYSTEM + " ตอนนี้กำลังแสดงผลสล็อตให้ user ดู พูดแบบ BOB ตอบสนองต่อผลที่ออกมา"
 _FLIP_SYSTEM  = BOB_SYSTEM + " ตอนนี้กำลังทอยเหรียญให้ user ดู พูดแบบ BOB ตอบสนองต่อ user ตามสถานการณ์"
 _LOTTERY_SYSTEM = BOB_SYSTEM + " ตอนนี้กำลังออกผลหวยให้ user ดู พูดแบบ BOB ทำนายหรือ react ตามสถานการณ์"
+_RPS_SYSTEM = BOB_SYSTEM + " ตอนนี้กำลังเล่นเป่ายิ้งฉุบ (ค้อน/กรรไกร/กระดาษ) กับ user พูดแบบ BOB กวนๆ ตอบสนองตามผล"
 
 
 async def _get_game_streak(user_id: int) -> tuple[int, bool]:
     """Return (streak_length, is_win_streak) from recent decisive game history."""
     entries = await get_history(user_id, limit=15)
-    decisive = [e for e in entries if e.get("cmd") in ("slot", "flip", "lottery") and e.get("net", 0) != 0]
+    decisive = [e for e in entries if e.get("cmd") in ("slot", "flip", "lottery", "rps") and e.get("net", 0) != 0]
     if not decisive:
         return 0, False
     is_win = decisive[0]["net"] > 0
@@ -348,7 +419,7 @@ async def _run_slot(ctx, amount: int) -> None:
         _spawn(log_history(ctx.author.id, {"cmd": "slot", "bet": amount, "symbols": symbols_str, "outcome": "lose", "multiplier": 0, "net": net}))
 
     em.set_footer(text=f"{ctx.author.display_name}  •  เดิมพัน {amount:,} เหรียญ")
-    await msg.edit(embed=em)
+    await msg.edit(embed=em, view=_SlotReplayView(_ctx_channel(ctx), ctx.author, amount))
     _spawn(record_game_outcome("slot", amount, net))
     _spawn(_post_game(ctx, amount, is_jackpot, streak, streak_is_win, ach_keys))
 
@@ -581,7 +652,7 @@ async def _run_bj(ctx, amount: int) -> None:
     player = [_lucky_card(user_luck), _lucky_card(user_luck)]
     dealer = [_bj_draw(), _bj_draw()]
 
-    def _bj_embed(p_hand, d_hand, hide_dealer=True, status=None, color=discord.Color.blurple()):
+    def _bj_embed(p_hand, d_hand, hide_dealer=True, status=None, color=discord.Color.blurple(), bet=None):
         p_tot = _bj_total(p_hand)
         d_visible = _bj_total([d_hand[0]]) if hide_dealer else _bj_total(d_hand)
         em = discord.Embed(title="🃏  B L A C K J A C K", color=color)
@@ -591,7 +662,7 @@ async def _run_bj(ctx, amount: int) -> None:
         em.add_field(name=f"👤 You  = {p_tot}", value=_bj_str(p_hand), inline=False)
         if status:
             em.add_field(name="​", value=status, inline=False)
-        em.set_footer(text=f"เดิมพัน {amount:,} 🪙  •  Hit หรือ Stand")
+        em.set_footer(text=f"เดิมพัน {bet or amount:,} 🪙  •  Hit, Double หรือ Stand")
         return em
 
     p_nat = _bj_total(player) == 21
@@ -623,58 +694,236 @@ async def _run_bj(ctx, amount: int) -> None:
 
     msg = await ctx.send(embed=_bj_embed(player, dealer))
 
+    total_bet = amount
+    doubled = False
     while _bj_total(player) < 21:
-        view = _BJView(ctx.author.id)
-        await msg.edit(embed=_bj_embed(player, dealer), view=view)
+        # Double Down: only on the first two cards, once per hand
+        allow_double = len(player) == 2 and not doubled
+        view = _BJView(ctx.author.id, allow_double=allow_double)
+        await msg.edit(embed=_bj_embed(player, dealer, bet=total_bet), view=view)
         timed_out = await view.wait()
         if timed_out or view.action == "stand":
+            break
+        if view.action == "double":
+            if await charge_wallet(ctx.author, amount) is None:
+                await ctx.send("เงินไม่พอจะ Double 😅 ถือว่า Stand นะ")
+                break
+            await house_receive(amount)
+            total_bet += amount
+            doubled = True
+            await msg.edit(embed=_bj_embed(player, dealer, False, "⬇️ **Double Down!** รับไพ่อีก 1 ใบแล้วจบ", bet=total_bet))
+            await asyncio.sleep(0.5)
+            player.append(_lucky_card(user_luck))
             break
         player.append(_lucky_card(user_luck))
 
     p_total = _bj_total(player)
 
     if p_total > 21:
-        net = -amount
-        em = _bj_embed(player, dealer, False, f"💥 **BUST!**  **-{amount:,}** 🪙", discord.Color.red())
+        net = -total_bet
+        em = _bj_embed(player, dealer, False, f"💥 **BUST!**  **-{total_bet:,}** 🪙", discord.Color.red(), bet=total_bet)
         await msg.edit(embed=em, view=None)
-        _spawn(record_game_outcome("bj", amount, net))
-        _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "result": "bust", "net": net}))
-        _spawn(_post_game(ctx, amount, False, 0, False, ["high_roller"] if amount >= 1_000_000 else []))
+        _spawn(record_game_outcome("bj", total_bet, net))
+        _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": total_bet, "doubled": doubled, "p": p_total, "d": _bj_total(dealer), "result": "bust", "net": net}))
+        _spawn(_post_game(ctx, total_bet, False, 0, False, ["high_roller"] if total_bet >= 1_000_000 else []))
         return
 
     while _bj_total(dealer) < 17:
         dealer.append(_bj_draw())
-        await msg.edit(embed=_bj_embed(player, dealer, False, "🏠 Dealer กำลังหยิบไพ่..."))
+        await msg.edit(embed=_bj_embed(player, dealer, False, "🏠 Dealer กำลังหยิบไพ่...", bet=total_bet))
         await asyncio.sleep(0.6)
 
     d_total = _bj_total(dealer)
 
     if d_total > 21 or p_total > d_total:
-        payout = int(amount * 1.8)
+        payout = int(total_bet * 1.8)
         actual = await house_payout(payout)
         await update_bank(ctx.author, actual)
-        net = actual - amount
+        net = actual - total_bet
         bust_note = "💥 Dealer Bust!  " if d_total > 21 else ""
-        em = _bj_embed(player, dealer, False, f"{bust_note}✅ **ชนะ!**  **+{net:,}** 🪙", discord.Color.green())
-        ach = ["first_win"] + (["high_roller"] if amount >= 1_000_000 else [])
+        em = _bj_embed(player, dealer, False, f"{bust_note}✅ **ชนะ!**  **+{net:,}** 🪙", discord.Color.green(), bet=total_bet)
+        ach = ["first_win"] + (["high_roller"] if total_bet >= 1_000_000 else [])
         result = "win"
     elif p_total == d_total:
-        actual = await house_payout(amount)
+        actual = await house_payout(total_bet)
         await update_bank(ctx.author, actual)
         net = 0
-        em = _bj_embed(player, dealer, False, "🤝 **Push** — คืนทุน", discord.Color.orange())
-        ach = ["high_roller"] if amount >= 1_000_000 else []
+        em = _bj_embed(player, dealer, False, "🤝 **Push** — คืนทุน", discord.Color.orange(), bet=total_bet)
+        ach = ["high_roller"] if total_bet >= 1_000_000 else []
         result = "push"
     else:
-        net = -amount
-        em = _bj_embed(player, dealer, False, f"❌ **แพ้!**  **-{amount:,}** 🪙", discord.Color.red())
-        ach = ["high_roller"] if amount >= 1_000_000 else []
+        net = -total_bet
+        em = _bj_embed(player, dealer, False, f"❌ **แพ้!**  **-{total_bet:,}** 🪙", discord.Color.red(), bet=total_bet)
+        ach = ["high_roller"] if total_bet >= 1_000_000 else []
         result = "lose"
 
     await msg.edit(embed=em, view=None)
-    _spawn(record_game_outcome("bj", amount, net))
-    _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": amount, "p": p_total, "d": d_total, "result": result, "net": net}))
-    _spawn(_post_game(ctx, amount, net > 0, 0, False, ach))
+    _spawn(record_game_outcome("bj", total_bet, net))
+    _spawn(log_history(ctx.author.id, {"cmd": "bj", "bet": total_bet, "doubled": doubled, "p": p_total, "d": d_total, "result": result, "net": net}))
+    _spawn(_post_game(ctx, total_bet, net > 0, 0, False, ach))
+
+
+# ── Rock Paper Scissors ───────────────────────────────────────────────────────
+
+class _RPSView(discord.ui.View):
+    def __init__(self, player_id: int):
+        super().__init__(timeout=30)
+        self.player_id = player_id
+        self.choice: str | None = None
+
+    async def _pick(self, interaction: discord.Interaction, choice: str):
+        if interaction.user.id != self.player_id:
+            await interaction.response.send_message("ไม่ใช่เกมของแก!", ephemeral=True)
+            return
+        self.choice = choice
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="🪨 ค้อน", style=discord.ButtonStyle.gray)
+    async def rock(self, interaction: discord.Interaction, _: discord.ui.Button):
+        await self._pick(interaction, "rock")
+
+    @discord.ui.button(label="✂️ กรรไกร", style=discord.ButtonStyle.gray)
+    async def scissors(self, interaction: discord.Interaction, _: discord.ui.Button):
+        await self._pick(interaction, "scissors")
+
+    @discord.ui.button(label="📄 กระดาษ", style=discord.ButtonStyle.gray)
+    async def paper(self, interaction: discord.Interaction, _: discord.ui.Button):
+        await self._pick(interaction, "paper")
+
+
+async def _run_rps(ctx, amount: int) -> None:
+    """เป่ายิ้งฉุบ vs BOT — ชนะ 1.8x, เสมอได้คืน, แพ้เสียเดิมพัน (Luck ส่งผล)."""
+    if not await _begin_game(ctx, amount):
+        return
+
+    user_luck = await get_effective_luck(ctx.author.id)
+    view = _RPSView(ctx.author.id)
+    em = discord.Embed(
+        title="✊  R P S   D U E L",
+        description="เลือกเลย: 🪨 ค้อน  ✂️ กรรไกร  📄 กระดาษ",
+        color=discord.Color.blurple(),
+    )
+    em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+    em.set_footer(text=f"เดิมพัน {amount:,} 🪙  •  ชนะ 1.8x  •  ตอบภายใน 30 วิ")
+    msg = await ctx.send(embed=em, view=view)
+    timed_out = await view.wait()
+
+    if timed_out or view.choice is None:
+        refund = await house_payout(amount)
+        await update_bank(ctx.author, refund)
+        em = discord.Embed(title="⏰ หมดเวลา!", description=f"คืนเดิมพัน **{refund:,}** 🪙 ให้แล้ว คราวหน้าเลือกให้ไวขึ้นนะ 😏", color=discord.Color.dark_gray())
+        em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        await msg.edit(embed=em, view=None)
+        return
+
+    player_choice = view.choice
+    # Luck shifts the outcome odds (same shape as flip): better luck → the bot
+    # picks the move that loses to yours more often, capped so it's never a joke.
+    win_thresh = min(0.33 * (user_luck ** 0.2), 0.45)
+    roll = random.random()
+    if roll < win_thresh:
+        bot_choice = _rps_move_that_loses_to(player_choice)
+    elif roll < win_thresh + 0.33:
+        bot_choice = player_choice
+    else:
+        bot_choice = _rps_move_that_beats(player_choice)
+
+    result = _rps_winner(player_choice, bot_choice)
+    taunt_task = _spawn(call_ai(
+        _RPS_SYSTEM,
+        [{"role": "user", "content": f"{ctx.author.name} เลือก{RPS_CHOICES[player_choice]} เดิมพัน {amount:,} เหรียญ ยั่วก่อนออกมือหน่อย"}],
+        fallback="เป่ายิ้งฉุบ! ปล่อยหมัดมาเลย",
+        max_tokens=60,
+    ))
+    streak_task = _spawn(_get_game_streak(ctx.author.id))
+    react_task = _spawn(call_ai(
+        _RPS_SYSTEM,
+        [{"role": "user", "content": f"{ctx.author.name} เลือก{RPS_CHOICES[player_choice]} บอทเลือก{RPS_CHOICES[bot_choice]} {'ชนะ' if result > 0 else 'เสมอ' if result == 0 else 'แพ้'} เดิมพัน {amount:,} เหรียญ react สั้นๆ แซวๆ"}],
+        fallback="ดีเลย!" if result > 0 else "เสมอกันพอดี" if result == 0 else "โชคไม่ดีเลยนะ",
+        max_tokens=60,
+    ))
+
+    _FRAMES = ["🪨", "✂️", "📄", "💥"]
+    for frame in _FRAMES:
+        await msg.edit(embed=_rps_frame_embed(ctx, frame, amount))
+        await asyncio.sleep(0.3)
+
+    taunt = await taunt_task
+    em = _rps_frame_embed(ctx, _FRAMES[-1], amount)
+    if taunt:
+        em.add_field(name="​", value=f"*{taunt}*", inline=False)
+    await msg.edit(embed=em)
+    await asyncio.sleep(0.6)
+
+    reaction = await react_task
+    streak, streak_is_win = await streak_task
+    bonus_pct, mercy = _streak_effects(streak, streak_is_win, amount)
+
+    my_icon = RPS_CHOICES[player_choice]
+    bot_icon = RPS_CHOICES[bot_choice]
+    if result > 0:
+        payout = int(amount * 1.8)
+        streak_bonus = int(payout * bonus_pct)
+        actual = await house_payout(payout + streak_bonus)
+        await update_bank(ctx.author, actual)
+        net = actual - amount
+        em = discord.Embed(title="✅ ชนะ!", color=discord.Color.green())
+        em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        em.add_field(name="👤 คุณ", value=my_icon, inline=True)
+        em.add_field(name="🤖 BOB", value=bot_icon, inline=True)
+        em.add_field(name="💰 ได้รับ", value=f"**+{net:,}** 🪙 (1.8x)", inline=False)
+        if streak_bonus > 0:
+            em.add_field(name=f"🔥 {streak}x Win Streak!", value=f"+{int(bonus_pct*100)}% bonus (+{streak_bonus:,} 🪙)", inline=False)
+        if actual < payout + streak_bonus:
+            em.add_field(name="⚠️ คลังหลวงแห้ง!", value=f"จ่ายได้แค่ **{actual:,}** 🪙", inline=False)
+        result_tag = "win"
+    elif result == 0:
+        actual = await house_payout(amount)
+        await update_bank(ctx.author, actual)
+        net = 0
+        em = discord.Embed(title="🤝 เสมอ!", color=discord.Color.orange())
+        em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        em.add_field(name="👤 คุณ", value=my_icon, inline=True)
+        em.add_field(name="🤖 BOB", value=bot_icon, inline=True)
+        em.add_field(name="💰 ได้รับ", value=f"คืนทุน **{amount:,}** 🪙", inline=False)
+        result_tag = "tie"
+    else:
+        net = -amount
+        em = discord.Embed(title="❌ แพ้!", color=discord.Color.red())
+        em.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        em.add_field(name="👤 คุณ", value=my_icon, inline=True)
+        em.add_field(name="🤖 BOB", value=bot_icon, inline=True)
+        em.add_field(name="💰 เสีย", value=f"**-{amount:,}** 🪙", inline=False)
+        if mercy > 0:
+            mercy_actual = await house_payout(mercy)
+            await update_bank(ctx.author, mercy_actual)
+            net += mercy_actual
+            em.add_field(name=f"💀 {streak}x Cold Streak — Mercy", value=f"+{mercy_actual:,} 🪙 (3% คืน)", inline=False)
+        result_tag = "lose"
+
+    if reaction:
+        em.add_field(name="​", value=f"*{reaction}*", inline=False)
+    em.set_footer(text=f"เดิมพัน {amount:,} 🪙  •  {my_icon} vs {bot_icon}")
+    await msg.edit(embed=em, view=None)
+
+    _spawn(record_game_outcome("rps", amount, net))
+    _spawn(log_history(ctx.author.id, {"cmd": "rps", "bet": amount, "pick": player_choice, "bot": bot_choice, "result": result_tag, "net": net}))
+    ach = []
+    if amount >= 1_000_000:
+        ach.append("high_roller")
+    if result > 0:
+        ach.append("first_win")
+        if streak_is_win and streak >= 4:
+            ach.append("streak_5")
+    _spawn(_post_game(ctx, amount, result > 0, streak, streak_is_win, ach))
+
+
+def _rps_frame_embed(ctx, frame: str, amount: int) -> discord.Embed:
+    em = discord.Embed(description=f"# {frame}", color=discord.Color.blurple())
+    em.set_author(name="✊  R P S   D U E L", icon_url=ctx.author.display_avatar.url)
+    em.set_footer(text=f"เดิมพัน {amount:,} 🪙  •  เป่ายิ้งฉุบ!")
+    return em
 
 
 # ─────────────────────────────────────────────────────────────────────────────

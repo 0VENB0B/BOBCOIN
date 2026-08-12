@@ -443,6 +443,47 @@ def test_lottery_modal_valid_ticket_runs(monkeypatch):
     run(scenario())
 
 
+def test_rps_modal_invalid_amount_errors():
+    async def scenario():
+        it = _Interaction(_Author(1))
+        modal = panel._RPSModal()
+        modal.amount._value = "abc"
+        await modal.on_submit(it)
+        assert it.response.messages
+        assert it.response.deferred is None
+    run(scenario())
+
+
+def test_rps_modal_valid_runs_game(monkeypatch):
+    calls = []
+
+    async def _fake_run_rps(ctx, amount):
+        calls.append((ctx, amount))
+
+    monkeypatch.setattr(panel, "_run_rps", _fake_run_rps)
+
+    async def scenario():
+        await open_account(_Author(1))
+        it = _Interaction(_Author(1))
+        modal = panel._RPSModal()
+        modal.amount._value = "1000"
+        await modal.on_submit(it)
+        assert calls and calls[0][1] == 1000
+        assert it.response.deferred is not None
+        assert await panel._cd_remaining(1, "rps") > 0      # cooldown set
+    run(scenario())
+
+
+def test_rps_btn_opens_modal():
+    async def scenario():
+        await open_account(_Author(1))
+        view = panel.GamePanelView()
+        it = _Interaction(_Author(1))
+        await view.rps_btn.callback(it)
+        assert it.response.modals and isinstance(it.response.modals[0], panel._RPSModal)
+    run(scenario())
+
+
 def test_deposit_modal_invalid_amount_errors():
     async def scenario():
         it = _Interaction(_Author(1))

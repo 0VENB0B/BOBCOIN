@@ -49,6 +49,19 @@ def _parse_optional_float(value: str, default: float) -> float:
 
 SLOT_JACKPOT_BASE = _parse_optional_float(os.getenv("GUCOIN_SLOT_JACKPOT_BASE", ""), 8 / 512)
 
+# Optional URL of a JSON file (e.g. a GitHub raw file you maintain) with Roblox
+# redeem codes, merged over the built-in list. Shape: {"Blox Fruits": ["CODE1", ...]}
+# (game-name keys must match the canonical names in roblox.ROBLOX_GAMES).
+ROBLOX_CODES_URL = os.getenv("GUCOIN_ROBLOX_CODES_URL", "")
+
+# Optional web-search providers for LIVE Roblox redeem-code lookups (searched
+# with the game name reported by the Roblox API). Google Custom Search is tried
+# first when both a key and a search-engine id are set, then Brave Search API.
+# With none configured the bot falls back to the built-in / external codes list.
+GOOGLE_API_KEY = os.getenv("GUCOIN_GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GUCOIN_GOOGLE_CSE_ID", "")
+BRAVE_API_KEY = os.getenv("GUCOIN_BRAVE_API_KEY", "")
+
 BOT_ICON_URL = "https://cdn.discordapp.com/attachments/865170212822319114/894807330313621535/Discord.png"
 LIKE_ICON_URL = "https://image.similarpng.com/very-thumbnail/2020/06/Icon-like-button-transparent-PNG.png"
 INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=880963590289498142&permissions=268823616&scope=bot"

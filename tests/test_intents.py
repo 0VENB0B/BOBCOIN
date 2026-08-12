@@ -122,6 +122,20 @@ def test_lottery_case_and_thai_aliases():
         assert intent["game"] == "lottery" and intent["ticket"] == "36412", kw
 
 
+# ── Roblox ────────────────────────────────────────────────────────────────
+
+def test_roblox_keywords():
+    for kw in ("roblox", "แมพ", "แมป", "หาแมพ", "แนะนำแมพ", "อยากได้แมพ"):
+        intent = _parse_intent(f"{kw} หน่อย")
+        assert intent["game"] == "roblox", kw
+
+
+def test_roblox_parses_with_numbers_but_game_is_roblox():
+    intent = _parse_intent("แนะนำแมพ roblox 500")
+    assert intent["game"] == "roblox"              # amount is parsed but unused
+    assert intent.get("amount") == 500
+
+
 # ── Misc robustness ─────────────────────────────────────────────────────
 
 def test_parse_intent_never_raises():

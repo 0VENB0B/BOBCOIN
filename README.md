@@ -11,7 +11,8 @@ XP/achievements, an AI-powered bank guardian, and an interactive casino panel.
 - `bobcoin/bank/`: money layer package — `core` (accounts/atomic transactions),
   `rewards` (interest/XP/achievements/daily/jackpot), `loans`, `debt`, `guardian`
   (bank health/luck/whale-proof bet cap)
-- `bobcoin/games.py`: pure game logic (blackjack/streak math — unit-tested)
+- `bobcoin/games.py`: pure game logic (blackjack/RPS/streak math — unit-tested)
+- `bobcoin/roblox.py`: Roblox top-map recommendations (live stats via Roblox's public APIs + curated fallback)
 - `bobcoin/gameplay.py`: game runners shared by the prefix commands and the casino panel
 - `bobcoin/components.py`: Discord Components v2 command menu
 - `bobcoin/cogs/`: command groups split by feature area
@@ -25,6 +26,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
+
+## Fun features
+
+- **`$roblox [แนวเกม|ชื่อแมพ]`** — แนะนำแมพ Roblox ชั้นนำแบบ **ข้อมูลจริงนำ** (rank ตามคนกำลังเล่นจริงจาก API — สุ่มจากท็อป 5 ของแนวที่เลือก) พร้อมสถิติสด (คนกำลังเล่น, ยอดเข้าชม, รูป) ผ่านปุ่ม 🔄 สุ่มแมพใหม่ / 📂 เลือกแนว / 🎮 เปิดเกม / **🎁 โค้ดเกม** (ค้นหาสดจาก Google/Brave ด้วยชื่อแมพที่ได้จาก API) และ **👥 ชวนเพื่อน** เพื่อแท็กเพื่อนให้มาเล่นด้วยกัน (เลือกได้สูงสุด 5 คน) พูดกับบอทว่า "แนะนำแมพ" ก็เปิดได้เหมือนกัน
+- **`$rps <amount>`** — เป่ายิ้งฉุบ vs BOB (ปุ่ม 🪨✂️📄) ชนะ 1.8x เสมอได้คืน แถมในคาสิโน panel ด้วย
+- **`$bj`** — เพิ่มปุ่ม **Double Down** (เดิมพัน 2 เท่า รับไพ่อีก 1 ใบแล้วจบ) เฉพาะเกมเดี่ยว
+- **`$quiz`** — เปลี่ยนเป็นแบบเลือกตอบ 4 ตัวเลือก (ปุ่ม) AI ออกข้อสอบเอง ตัวถูกขึ้นเขียว ตัวผิดขึ้นแดง
+- **สล็อต** — กด 🔄 เล่นอีกได้ทันทีด้วยเงินเดิมพันเดิม
 
 For development/testing, also install `requirements-dev.txt` (adds pytest).
 
@@ -44,6 +53,10 @@ For development/testing, also install `requirements-dev.txt` (adds pytest).
 | `LOG_LEVEL` | Optional | Defaults to `INFO` |
 | `GUCOIN_AUDIT_CHANNEL_ID` | Optional | Casino audit channel — copies of deleted game results are forwarded here (`0` disables) |
 | `GUCOIN_SLOT_JACKPOT_BASE` | Optional | Slot jackpot rate per spin, default `0.015625` (≈1.56%); tune from `$stats` |
+| `GUCOIN_ROBLOX_CODES_URL` | Optional | URL ของ JSON ที่เจ้าของบอทดูแลไว้สำหรับอัปเดตโค้ดเกม Roblox (merge ทับลิสต์ในบอท) — รูปแบบ `{"Blox Fruits": ["CODE1", ...]}` โดยชื่อเกมต้องตรงกับชื่อในบอท (เช่น `Blox Fruits`) |
+| `GUCOIN_GOOGLE_API_KEY` | Optional | Google Cloud API key (เปิดใช้งาน Custom Search API) — เปิดการค้นหาโค้ดเกมสดจาก Google |
+| `GUCOIN_GOOGLE_CSE_ID` | Optional | Programmable Search Engine ID — ต้องตั้งคู่กับ key ข้างบน (`https://programmablesearchengine.google.com`) |
+| `GUCOIN_BRAVE_API_KEY` | Optional | Brave Search API key — ตัวเลือกแทน Google (ฟรี ~2,000 ครั้ง/เดือน, `https://api.search.brave.com`) |
 | `GUCOIN_DEV_MODE` | Optional | `1` enables dev/ops commands — `$metrics` (in-process bot health: uptime, commands, AI calls, background-task failures) joins `$setluck`/`$seed`/`$guardian_run`/`$bankhealth` |
 
 > A ready-to-fill template lives in `.env.example`.
@@ -62,11 +75,12 @@ python -m pytest tests/ -v
 ```
 
 The suite fakes `google.cloud.firestore` entirely, so it runs offline with zero
-credentials. **460 tests** — the money layer is at ~100%, every cog including
-the interaction-heavy panel, and total `bobcoin/` coverage is **91%**
-(fail-under gate in CI). **489 tests** covering the P2 backlog and the P1
+credentials. **593 tests** — the money layer is at ~100%, every cog including
+the interaction-heavy panel, and total `bobcoin/` coverage is **95%**
+(fail-under gate in CI). Covering the P2 backlog, the P1
 hardening (AI-loan strict parsing + per-day rate limit + audit logging, `$BD`
-admin+whitelist, dev commands behind `GUCOIN_DEV_MODE`):
+admin+whitelist, dev commands behind `GUCOIN_DEV_MODE`), the fun round
+(RPS, BJ double down, MCQ quiz, slot replay, Roblox rankings + redeem codes):
 leaderboard via the denormalized `total` index (`get_leaderboard`, no collection
 scan), house win-rate stats (`record_game_outcome` / `$stats`), and the casino
 audit-copy (`GUCOIN_AUDIT_CHANNEL_ID`):

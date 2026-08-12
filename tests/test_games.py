@@ -8,7 +8,17 @@ import random
 
 import pytest
 
-from bobcoin.games import _bj_draw, _bj_str, _bj_total, _lucky_card, _streak_effects
+from bobcoin.games import (
+    RPS_CHOICES,
+    _bj_draw,
+    _bj_str,
+    _bj_total,
+    _lucky_card,
+    _rps_move_that_beats,
+    _rps_move_that_loses_to,
+    _rps_winner,
+    _streak_effects,
+)
 
 # ── Blackjack totals: property tests ────────────────────────────────────
 
@@ -155,3 +165,39 @@ def test_streak_effects_negative_streak_never_crashes():
     # defensive: a broken counter must not raise
     assert _streak_effects(-5, True, 100) == (0.0, 0)
     assert _streak_effects(-5, False, 100) == (0.0, 0)
+
+
+# ── Rock Paper Scissors ─────────────────────────────────────────────────
+
+def test_rps_choices_complete():
+    assert set(RPS_CHOICES) == {"rock", "scissors", "paper"}
+
+
+def test_rps_winner_matrix():
+    assert _rps_winner("rock", "scissors") == 1      # ค้อน ทุบ กรรไกร
+    assert _rps_winner("scissors", "paper") == 1     # กรรไกร ตัด กระดาษ
+    assert _rps_winner("paper", "rock") == 1         # กระดาษ ห่อ ค้อน
+    assert _rps_winner("scissors", "rock") == -1
+    assert _rps_winner("paper", "scissors") == -1
+    assert _rps_winner("rock", "paper") == -1
+    for move in RPS_CHOICES:
+        assert _rps_winner(move, move) == 0            # ties
+
+
+def test_rps_winner_antisymmetric():
+    for a in RPS_CHOICES:
+        for b in RPS_CHOICES:
+            assert _rps_winner(a, b) == -_rps_winner(b, a)
+
+
+def test_rps_move_helpers_are_consistent():
+    for move in RPS_CHOICES:
+        beating = _rps_move_that_beats(move)
+        losing = _rps_move_that_loses_to(move)
+        assert _rps_winner(beating, move) == 1          # beats move
+        assert _rps_winner(move, losing) == 1           # move beats losing
+        assert beating != move and losing != move
+        assert beating != losing
+        # exactly one winning and one losing move per choice
+        others = [m for m in RPS_CHOICES if m != move]
+        assert set(others) == {beating, losing}
